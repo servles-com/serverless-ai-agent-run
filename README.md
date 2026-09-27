@@ -299,5 +299,5 @@ docs/                архитектура, безопасность, roadmap, 
 - Держать актуальными `docs/requirements-log.md` и `docs/security-checklist.md`.
 - Флоу: feature-ветка → PR → CI зелёный → merge → `machine.sh bootstrap` → selftest.
 - Никаких облачных сервисов (GCS, Secret Manager, managed DB/queues): только машина, файлы, sqlite, systemd, docker+gVisor.
-- План CI/CD и логов: `docs/ci-cd-and-logging-development-plan.md`. Приватный репо на GitHub Free — branch protection недоступна, последнюю линию держит машина (CD сверяет статус коммита).
+- План CI/CD и логов: `docs/ci-cd-and-logging-development-plan.md`. Репо публичный; `main` защищён: только PR + зелёный `check`, в том числе для админов. Секреты, токены, IP машины и личные данные в репо и issues не писать.
   В `main` напрямую не пушить.
