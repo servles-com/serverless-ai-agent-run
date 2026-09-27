@@ -308,7 +308,7 @@ docs/                архитектура, безопасность, roadmap, 
 - Изменения изоляции комнаты — только с зелёным `tests/e2e/isolation.test.ts` на VM
   с `SAR_ROOM_RUNTIME=runsc`.
 - Разбор рана: `GET /runs/{id}/debug` или на VM `/var/lib/sar/runs/<id>/`.
-- Держать актуальными `docs/requirements-log.md` и `docs/security-checklist.md`.
+- Требования и статус — в GitHub issues (open/closed + комментарий с причиной). `docs/requirements-log.md` — архив, строки не добавлять. `docs/security-checklist.md` держать актуальным.
 - Флоу: feature-ветка → PR → CI зелёный → merge → `machine.sh bootstrap` → selftest.
 - Никаких облачных сервисов (GCS, Secret Manager, managed DB/queues): только машина, файлы, sqlite, systemd, docker+gVisor.
 - План CI/CD и логов: `docs/ci-cd-and-logging-development-plan.md`. Репо публичный; `main` защищён: только PR + зелёный `check`, в том числе для админов. Секреты, токены, IP машины и личные данные в репо и issues не писать.
