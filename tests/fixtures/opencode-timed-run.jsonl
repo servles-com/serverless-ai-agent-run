@@ -1,0 +1,6 @@
+{"type":"step_start","timestamp":1000,"sessionID":"ses_01","part":{"id":"prt_01","sessionID":"ses_01","messageID":"msg_01","type":"step-start"}}
+{"type":"tool_use","timestamp":1500,"sessionID":"ses_01","part":{"id":"prt_02","sessionID":"ses_01","messageID":"msg_01","type":"tool","callID":"call_01","tool":"bash","state":{"status":"completed","input":{"command":"ls -la /workspace"},"output":"total 0\n","title":"List workspace","metadata":{},"time":{"start":1200,"end":1500}}}}
+{"type":"step_finish","timestamp":2000,"sessionID":"ses_01","part":{"id":"prt_03","sessionID":"ses_01","messageID":"msg_01","type":"step-finish","reason":"tool-calls","cost":0,"tokens":{"input":100,"output":20,"reasoning":0,"cache":{"read":0,"write":0},"total":120}}}
+{"type":"step_start","timestamp":2100,"sessionID":"ses_01","part":{"id":"prt_04","sessionID":"ses_01","messageID":"msg_01","type":"step-start"}}
+{"type":"text","timestamp":2500,"sessionID":"ses_01","part":{"id":"prt_05","sessionID":"ses_01","messageID":"msg_01","type":"text","text":"Done. Created /artifacts/report.txt","time":{"start":2200,"end":2500}}}
+{"type":"step_finish","timestamp":2600,"sessionID":"ses_01","part":{"id":"prt_06","sessionID":"ses_01","messageID":"msg_01","type":"step-finish","reason":"stop","cost":0,"tokens":{"input":140,"output":10,"reasoning":0,"cache":{"read":0,"write":0},"total":150}}}

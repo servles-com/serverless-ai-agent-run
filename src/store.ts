@@ -50,7 +50,11 @@ export interface RunRecord {
   started_at?: string;
   finished_at?: string;
   room?: { container: string; runtime: string; exit_code?: number | null; oom_killed?: boolean };
-  result?: { text?: string; artifacts: string[]; steps: number; tool_calls: number; tool_errors: number; tokens?: number };
+  result?: {
+    text?: string; artifacts: string[]; steps: number; tool_calls: number; tool_errors: number; tokens?: number;
+    model_ms?: number; tool_ms?: number; open_ms?: number;
+    step_timings?: { step: number; model_ms: number; tool_ms: number; total_ms: number; open_ms?: number }[];
+  };
   diagnosis?: Diagnosis;
   warnings?: string[];
 }
