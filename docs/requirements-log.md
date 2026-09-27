@@ -13,9 +13,13 @@
 - [реализовано] Секреты по имени из серверного файла (`secrets: ["GITHUB_TOKEN"]`)
 - [реализовано] Selftest (unit + failure modes + isolation + live) и dogfood-таймер на бесплатных моделях каждые 3ч
 - [реализовано] Бутстрап VM одной командой, systemd-юниты, GCP lab-скрипт
+- [реализовано] Selftest зелёный на GCP lab VM с gVisor (runsc), включая живой opencode на бесплатной модели — 2026-09-27
+- [реализовано] CI: typecheck + unit на каждый PR
+- [реализовано] Классификация таймаутов из-за ретраев провайдера (504) как MODEL_PROVIDER_ERROR — первая находка dogfood
 - [отклонено для V0 (overkill, см. review 2026-09-27)] Мультитенантность, storage gateway room→tenant, fake object store, KMS, AUTH_REQUIRED
 - [отклонено для V0] LLM-противник как часть security suite — детерминированные пробы важнее, бесплатные модели дают шум
 - [планируется] Авто-issue на новые классы падений из dogfood → self-fix через opencode-сессию
+- [планируется] Fail-fast при повторяющихся ошибках провайдера (не ждать 10 мин таймаута)
 - [планируется] Self-hosted GitHub runner на VM, selftest на каждый PR
 - [планируется] LLM-прокси на хосте: ключ провайдера не попадает в комнату, точная классификация MODEL_* по HTTP-статусам
 - [планируется] POST /runs/{id}/messages (продолжение сессии)

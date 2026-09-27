@@ -23,6 +23,10 @@ const rows = readFileSync(history, 'utf8').split('\n').filter(Boolean).map(l => 
 const byCat = new Map<string, any[]>();
 for (const r of rows) byCat.set(r.category, [...(byCat.get(r.category) ?? []), r]);
 
+if (!dry && !process.env.GH_TOKEN && !process.env.GITHUB_TOKEN) {
+  console.log(`skip: ${rows.length} watched failures, but no GITHUB_TOKEN in /etc/sar/secrets.env to file issues`);
+  process.exit(0);
+}
 const open = dry ? [] : JSON.parse(execFileSync('gh', ['issue', 'list', '-R', REPO, '--state', 'open', '--label', 'dogfood',
   '--json', 'title', '--limit', '200']).toString()).map((i: any) => i.title);
 

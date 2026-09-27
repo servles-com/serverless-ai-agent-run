@@ -23,8 +23,17 @@ const MODEL_ERROR_PATTERNS: [RegExp, string, boolean][] = [
   [/model.?not.?found|ProviderModelNotFound|no endpoints found|invalid model/i, 'MODEL_NOT_FOUND', false],
   [/\b401\b|\b403\b|unauthori[sz]ed|invalid api key|authentication/i, 'MODEL_AUTH_FAILED', false],
   [/context.?length|maximum context|too many tokens|context window/i, 'MODEL_CONTEXT_OVERFLOW', false],
-  [/\b5\d\d\b|overloaded|upstream|provider returned error|timeout.*(provider|model)|ECONNRESET|ETIMEDOUT|fetch failed/i, 'MODEL_PROVIDER_ERROR', true],
+  [/code[=:" ]+5\d\d\b|status(Code)?[=:" ]+5\d\d\b|\b50[234]\b|overloaded|upstream|provider returned error|stream error|timeout.*(provider|model)|ECONNRESET|ETIMEDOUT|fetch failed/i, 'MODEL_PROVIDER_ERROR', true],
 ];
+
+function providerHits(text: string): [string, string][] {
+  const out: [string, string][] = [];
+  for (const line of text.split('\n')) {
+    const m = MODEL_ERROR_PATTERNS.find(([re]) => re.test(line));
+    if (m) out.push([m[1], line]);
+  }
+  return out;
+}
 
 export function classify(f: Facts): Verdict {
   const { room, stats } = f;
@@ -48,6 +57,19 @@ export function classify(f: Facts): Verdict {
     return fail('FAILED', 'OOM_KILLED', 'Room exceeded its memory limit and was killed by the kernel',
       [`exit_code=${room.exitCode}`, ...tail(4)], false,
       ['Raise limits.memory_mb', 'Check what the agent was running in the last tool events']);
+  }
+  // Timeout/stall while the provider kept erroring and the agent never got a
+  // single tool call through: the model side is the cause, not the agent.
+  // (Seen in dogfood: OpenRouter 504 "stream error" + opencode retries every ~2 min.)
+  if ((room.timedOut || room.idleKilled) && stats.toolCalls === 0) {
+    const hits = providerHits(logText);
+    if (hits.length) {
+      const [category, sample] = hits[0];
+      return fail(room.timedOut ? 'TIMED_OUT' : 'FAILED', category,
+        `Model provider kept failing (${hits.length} errors); agent retried until ${room.timedOut ? 'timeout' : 'idle stall'} without a single tool call`,
+        [`provider_errors=${hits.length}`, sample.slice(0, 500)], true,
+        ['Switch model — this one is unavailable/overloaded right now', 'Failing fast on repeated provider errors is a runtime TODO']);
+    }
   }
   if (room.timedOut) {
     return fail('TIMED_OUT', 'TIMEOUT', 'Run exceeded limits.timeout_s',

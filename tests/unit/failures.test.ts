@@ -38,3 +38,16 @@ test('truncated answer is a warning', () => {
 });
 test('shell adapter: exit 0 with no events is fine', () =>
   assert.equal(cat(facts({}, { parsedLines: 0, steps: 0, toolCalls: 0, finalText: undefined }, 'shell')), 'SUCCEEDED'));
+
+test('timeout caused by provider 504 retries -> MODEL_PROVIDER_ERROR (dogfood 2026-09-27)', () => {
+  const line = 'timestamp=2026-09-27T18:22:21Z level=ERROR message="stream error" providerID=openrouter error.error.code=504';
+  const v = classify(facts({ timedOut: true, exitCode: 137, stderrTail: [line, line, line] }, { toolCalls: 0, steps: 3, finalText: undefined }));
+  assert.equal(v.state, 'TIMED_OUT');
+  assert.equal(v.diagnosis?.category, 'MODEL_PROVIDER_ERROR');
+});
+test('timeout with real tool work stays TIMEOUT even if a provider error happened once', () => {
+  const v = classify(facts({ timedOut: true, exitCode: 137, stderrTail: ['error.error.code=504'] }, { toolCalls: 7 }));
+  assert.equal(v.diagnosis?.category, 'TIMEOUT');
+});
+test('durations like 500ms are not provider errors', () =>
+  assert.equal(cat(facts({ exitCode: 2, stderrTail: ['took 500ms'] })), 'AGENT_CRASHED'));
