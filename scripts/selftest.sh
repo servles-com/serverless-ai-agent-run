@@ -4,7 +4,7 @@
 #   SAR_LIVE=1 bash scripts/selftest.sh # + one live opencode run on a free model
 # Reads SAR_URL / SAR_API_TOKEN, falling back to /etc/sar/sar.env on the VM.
 set -uo pipefail
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/.." || exit 1
 if [ -z "${SAR_API_TOKEN:-}" ] && [ -r /etc/sar/sar.env ]; then
   set -a; . /etc/sar/sar.env; set +a
 fi

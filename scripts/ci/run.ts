@@ -10,7 +10,7 @@ import { readFileSync, readdirSync, existsSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   evaluate, isTestPath, countTests, parseProbeNames, parseDiff,
-  type FileChange, type Violation,
+  type Violation,
 } from './guards.ts';
 
 const git = (args: string[]): string => execFileSync('git', args, { encoding: 'utf8' });

@@ -51,3 +51,36 @@ test('timeout with real tool work stays TIMEOUT even if a provider error happene
 });
 test('durations like 500ms are not provider errors', () =>
   assert.equal(cat(facts({ exitCode: 2, stderrTail: ['took 500ms'] })), 'AGENT_CRASHED'));
+test('auth failure', () =>
+  assert.equal(cat(facts({ exitCode: 1, stderrTail: ['Error: 401 invalid api key'] })), 'MODEL_AUTH_FAILED'));
+test('context overflow', () =>
+  assert.equal(cat(facts({ exitCode: 1, stderrTail: ['maximum context length exceeded'] })), 'MODEL_CONTEXT_OVERFLOW'));
+test('export failure after a successful agent run', () => {
+  const v = classify({ ...facts(), exportError: 'EACCES' });
+  assert.equal(v.diagnosis?.category, 'EXPORT_FAILED');
+});
+test('idle stall caused by provider errors -> FAILED with provider category', () => {
+  const v = classify(facts({ idleKilled: true, exitCode: 137, stderrTail: ['429 too many requests'] }, { toolCalls: 0 }));
+  assert.equal(v.state, 'FAILED');
+  assert.equal(v.diagnosis?.category, 'MODEL_RATE_LIMITED');
+});
+test('timeout after many steps hints at looping', () =>
+  assert.match(classify(facts({ timedOut: true, exitCode: 137 }, { steps: 40 })).diagnosis!.hints.join(), /looping/));
+test('tool errors and non-JSON lines become warnings', () => {
+  const v = classify(facts({}, { toolErrors: 2, toolCalls: 3, unparsedLines: 4 }));
+  assert.equal(v.state, 'SUCCEEDED');
+  assert.match(v.warnings.join('\n'), /2\/3 tool calls failed/);
+  assert.match(v.warnings.join('\n'), /4 stdout lines/);
+});
+
+// Every category the classifier can emit must be asserted by some test above:
+// a new category added to failures.ts without a test fails CI.
+test('every category in failures.ts is covered by a test', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const src = await readFile(new URL('../../src/failures.ts', import.meta.url), 'utf8');
+  const self = await readFile(new URL(import.meta.url), 'utf8');
+  const categories = new Set(src.match(/'[A-Z][A-Z_]{3,}'/g)!.map(s => s.slice(1, -1)));
+  categories.delete('SUCCEEDED'); categories.delete('FAILED'); categories.delete('TIMED_OUT');
+  const missing = [...categories].filter(c => !self.includes(`'${c}'`));
+  assert.deepEqual(missing, [], `categories without a unit test: ${missing.join(', ')}`);
+});

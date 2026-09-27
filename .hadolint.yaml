@@ -1,0 +1,4 @@
+ignored:
+  # Debian package pins break on every point release of the base image; the
+  # image is rebuilt from a pinned opencode version and a fixed Debian suite.
+  - DL3008
