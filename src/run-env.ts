@@ -17,7 +17,7 @@ const exec = promisify(execFile);
 // Untrusted JSON body: fields are checked here before it is treated as a RunRequest.
 interface RequestBody {
   agent?: string; task?: unknown; files?: Record<string, string>; secrets?: string[]; expect?: unknown;
-  repo?: { url?: string; pull_request?: unknown }; webhook?: { url?: string };
+  repo?: { url?: string; pull_request?: unknown }; webhook?: { url?: string }; live?: unknown;
 }
 
 export function validateRequest(input: unknown): string | undefined {
@@ -32,6 +32,7 @@ export function validateRequest(input: unknown): string | undefined {
     if (!config.githubPushToken) return 'pull_request is not enabled on this server (no SAR_GITHUB_PUSH_TOKEN)';
     if (!repoAllowed(body.repo.url!, config.prRepos)) return `pull_request not allowed for ${body.repo.url} (allowed: ${config.prRepos.join(', ') || 'none'})`;
   }
+  if (body.live !== undefined && typeof body.live !== 'boolean') return 'live must be a boolean';
   if (body.webhook && !/^https?:\/\//.test(body.webhook.url ?? '')) return 'webhook.url must be an http(s) URL';
   for (const s of body.secrets ?? []) if (!(s in config.secrets)) return `unknown secret "${s}" (not in server secrets file)`;
   return validateExpect(body.expect, !!body.repo?.pull_request);

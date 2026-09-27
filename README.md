@@ -236,7 +236,10 @@ GET  /healthz                     docker, runtime, образ, очередь
 только на чтение и только этого рана: `events`, `stream`, `transcript`, `artifacts` (403 на всё остальное,
 в том числе на другой ран). Хранится только sha256, живёт до удаления рана. Для `EventSource` без заголовков —
 `?access_token=<stream_token>` (мастер-ключ так не принимается). Секреты вычищены до fan-out (`store.emit`).
-Сейчас построчно: текст и tool call видны, когда opencode их завершил; дельты — фаза 2.
+По умолчанию построчно: текст и tool call видны, когда opencode их завершил. С `"live": true` (opencode,
+фаза 2, #108) в комнате работает обёртка `src/adapters/opencode-live.mjs`: `opencode serve` + `run --attach`,
+поток событий сервера внутри комнаты → `agent.text.delta` (не чаще 5/с на часть), `agent.tool.start` сразу при
+запуске команды, `agent.tool.output` (вывод по мере выполнения). Образ, `rooms.ts` и сеть не меняются.
 
 ---
 

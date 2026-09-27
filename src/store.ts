@@ -33,6 +33,7 @@ export interface RunRequest {
   // agent_events: true = every agent event; 'coalesced' = ≤ 1 batch / 2 s (src/stream.ts).
   webhook?: { url: string; secret?: string; agent_events?: boolean | 'coalesced' };
   expect?: Expect;               // result contract, see checkDeliverable() in failures.ts
+  live?: boolean;                // opencode: stream text deltas and running tools (agent.text.delta, agent.tool.start/output)
   limits?: { timeout_s?: number; idle_timeout_s?: number; memory_mb?: number; cpus?: number; pids?: number };
   metadata?: Record<string, unknown>;
 }
