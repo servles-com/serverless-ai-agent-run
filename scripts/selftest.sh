@@ -19,7 +19,7 @@ step "e2e: isolation"           node --test --test-concurrency=1 tests/e2e/isola
 step "e2e: batches"           node --test --test-concurrency=1 tests/e2e/batches.test.ts
 step "e2e: credentials"       node --test --test-concurrency=1 tests/e2e/credentials.test.ts
 step "e2e: secret redaction"    node --test --test-concurrency=1 tests/e2e/redaction.test.ts
-step "e2e: streaming"           node --test --test-concurrency=1 tests/e2e/stream.test.ts
+step "e2e: streaming"           node --test --test-concurrency=1 tests/e2e/stream.test.ts tests/e2e/telegram-live.test.ts
 if [ "${SAR_LIVE:-0}" = "1" ]; then
   step "e2e: live opencode"     node --test tests/e2e/opencode-live.test.ts
 fi
