@@ -26,6 +26,9 @@ export const config = {
   insecureDev: process.env.SAR_INSECURE_DEV === '1',
   dataDir: resolve(process.env.SAR_DATA_DIR ?? 'runtime-data'),
   maxRooms: num('SAR_MAX_ROOMS', 1),
+  // Rooms are labelled with the instance that owns them, so a second instance on the
+  // same machine (the CI candidate, C3) never reaps or counts the main service's rooms.
+  instance: process.env.SAR_INSTANCE ?? 'main',
 
   // Room runtime
   docker: process.env.SAR_DOCKER_BIN ?? 'docker',
