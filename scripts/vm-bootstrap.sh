@@ -44,7 +44,9 @@ fi
 log "service user + code"
 id sar >/dev/null 2>&1 || useradd --system --create-home --shell /usr/sbin/nologin sar
 usermod -aG docker sar
-if [ -d /opt/sar/.git ]; then git -C /opt/sar fetch -q && git -C /opt/sar checkout -q "$BRANCH" && git -C /opt/sar reset -q --hard "origin/$BRANCH"
+if [ -n "${SAR_LOCAL_SRC:-}" ]; then            # code shipped by scripts/gcp-lab-vm.sh (private repo)
+  mkdir -p /opt/sar && cp -a "$SAR_LOCAL_SRC"/. /opt/sar/
+elif [ -d /opt/sar/.git ]; then git -C /opt/sar fetch -q && git -C /opt/sar checkout -q "$BRANCH" && git -C /opt/sar reset -q --hard "origin/$BRANCH"
 else git clone -q -b "$BRANCH" "$REPO" /opt/sar; fi
 chown -R sar:sar /opt/sar
 mkdir -p /var/lib/sar /etc/sar && chown sar:sar /var/lib/sar
