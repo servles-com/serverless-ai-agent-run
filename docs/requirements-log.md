@@ -31,6 +31,7 @@
 - [планируется] Стриминг лога сессии #97 (G11): дельты, tool start/output, stream-токен рана, транскрипт
 - [в работе] North Star сценарий (docs/north-star-user-scenario.md): N1–N10; эпик Google Drive/Docs #88 (3 ресёрча), capabilities-флаги #89
 - [в работе] Архитектура передачи кредов (docs/credential-passing-architecture-zerocreds-and-runs.md): хендлы cred:, креды и работа разными каналами, уровни L0–L3, T1 ссылки (основной путь), формы ZeroCreds с «скопировать как API», CLI `sar cred put`; Google — отдельный SA на пользователя через impersonation (#88)
+- [в работе] Ядро кредов и шлюза хоста (#92 K9, #46 K2): `src/creds/` (хендлы, файловый бэкенд `users/<owner>/`, резолв только у владельца, аудит `credential-access.jsonl`), `src/gateway.ts` (один слушатель на sar0, токен рана, `/proxy/<host>/…` с подстановкой заголовка, SSRF-гард, вырезание значения из ответов), `validateCredentials`, `CREDENTIAL_MISSING`/`CREDENTIAL_REVOKED`. Реализовано модулем с unit; подключение к рану и правило NP — шаг 4 водителя (docs/host-gateway-and-credential-refs-design.md)
 - [в работе] Креды без облака: ZeroCreds (сбор, write-only) → OpenBao на машине → брокер SAR → доставка через прокси; GitHub App вместо PAT; BYO vault (docs/credentials-and-secret-storage-design.md) → issues K1–K8
 - [в работе] План CI/CD-гарда и логов (docs/ci-cd-and-logging-development-plan.md) → issues C1–C7, G1–G10
 - [реализовано] Ресёрч по 6 сценариям (24 плана) сведён в итоговые планы #75 #78 #79 #81 #82 #83 (метка plan:final) — 2026-09-27

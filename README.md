@@ -280,6 +280,7 @@ src/failures.ts      классификатор падений
 src/webhooks.ts      подписанные вебхуки по порядку, с ретраями
 src/adapters/        opencode (поток JSON-событий), shell (для тестов)
 src/store.ts         раны на диске
+src/creds/           хендлы кредов, файловый бэкенд, брокер с аудитом (ещё не подключено к рану)
 room-image/          образ комнаты (node + opencode + git + python)
 scripts/             bootstrap, сетевая политика, selftest, dogfood, burst, status, machine (SSH), gcp-lab-vm
 deploy/              systemd-юниты, пример secrets

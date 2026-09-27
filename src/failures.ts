@@ -14,6 +14,8 @@ export interface Facts {
   stats: AgentStats;
   artifacts: string[];
   exportError?: string;
+  // Gateway refused a credential during the run (src/gateway.ts takeErrors).
+  credentialErrors?: { code: 'CREDENTIAL_MISSING' | 'CREDENTIAL_REVOKED'; ref: string }[];
 }
 
 export interface Verdict { state: RunState; diagnosis?: Diagnosis; warnings: string[] }
@@ -53,6 +55,11 @@ export function classify(f: Facts): Verdict {
       ['Check `GET /healthz`: image built? runtime (runsc) registered in docker?', 'See room/docker-args.json for the exact docker command']);
   }
   if (room.cancelled) return fail('CANCELLED', 'CANCELLED', 'Run was cancelled by the caller', [], true, []);
+  // A credential the run declared was missing or revoked, and the run did not
+  // finish cleanly: that is the cause, not whatever the agent did next.
+  if (f.credentialErrors?.length && (room.exitCode !== 0 || room.timedOut || room.idleKilled || !stats.finalText)) {
+    return { ...credentialVerdict(f.credentialErrors), warnings };
+  }
   if (room.oomKilled) {
     return fail('FAILED', 'OOM_KILLED', 'Room exceeded its memory limit and was killed by the kernel',
       [`exit_code=${room.exitCode}`, ...tail(4)], false,
@@ -129,6 +136,20 @@ export function classify(f: Facts): Verdict {
   }
 
   return { state: 'SUCCEEDED', warnings };
+}
+
+// Missing/revoked credentials, either at PREPARING (env delivery, before a room
+// starts) or reported by the gateway during the run. Revoked wins: it needs the
+// owner to act, a missing one may just be a typo in the handle.
+export function credentialVerdict(errs: { code: 'CREDENTIAL_MISSING' | 'CREDENTIAL_REVOKED'; ref: string }[]): Verdict {
+  const revoked = errs.filter(e => e.code === 'CREDENTIAL_REVOKED');
+  const category = revoked.length ? 'CREDENTIAL_REVOKED' : 'CREDENTIAL_MISSING';
+  const refs = (revoked.length ? revoked : errs).map(e => e.ref);
+  return { state: 'FAILED', warnings: [], diagnosis: category === 'CREDENTIAL_REVOKED'
+    ? { category, summary: `Credential revoked by its owner: ${refs.join(', ')}`, evidence: errs.map(e => `${e.code} ${e.ref}`),
+        retryable: false, hints: ['Store the credential again in ZeroCreds (a new handle or the same name) and rerun'] }
+    : { category, summary: `Credential not found in the run owner's namespace: ${refs.join(', ')}`, evidence: errs.map(e => `${e.code} ${e.ref}`),
+        retryable: false, hints: ['Check the handle (cred:<name> or cred:<your-owner>/<name>)', 'Handles of other owners are never resolved', 'Store it via ZeroCreds first'] } };
 }
 
 // --- Result contract (SB1). A run that "succeeded" but did not deliver what the
