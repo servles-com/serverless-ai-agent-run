@@ -127,3 +127,10 @@ test('parseDiff keeps a deleted file under its old path so the sensitive-file ru
   assert.equal(changes[0].removed.length, 2);
   assert.ok(securityReviewViolation(changes, []));
 });
+
+test('rule: the guard and the workflows are sensitive themselves', () => {
+  assert.equal(isSensitivePath('scripts/ci/guards.ts'), true);
+  assert.equal(isSensitivePath('scripts/ci/run.ts'), true);
+  assert.equal(isSensitivePath('.github/workflows/ci.yml'), true);
+  assert.equal(isSensitivePath('scripts/dogfood-status.sh'), false);
+});
