@@ -15,6 +15,7 @@ import { EventEmitter } from 'node:events';
 import { config } from './config.ts';
 import { scrub } from './redact.ts';
 import type { Expect } from './failures.ts';
+import type { CredentialSpec } from './creds/handle.ts';
 
 export type RunState =
   | 'QUEUED' | 'PREPARING' | 'RUNNING' | 'EXPORTING'
@@ -30,8 +31,11 @@ export interface RunRequest {
   // pull_request: the host (never the room) commits the agent's edits and opens a PR.
   repo?: { url: string; ref?: string; pull_request?: { base?: string; title?: string; body?: string; branch?: string } };
   secrets?: string[];
-  webhook?: { url: string; secret?: string; agent_events?: boolean };
+  // agent_events: true = every agent event; 'coalesced' = ≤ 1 batch / 2 s (src/stream.ts).
+  webhook?: { url: string; secret?: string; agent_events?: boolean | 'coalesced' };
   expect?: Expect;               // result contract, see checkDeliverable() in failures.ts
+  credentials?: CredentialSpec[]; // references only (cred:<name>), resolved by the broker; see src/creds/
+  live?: boolean;                // opencode: stream text deltas and running tools (agent.text.delta, agent.tool.start/output)
   limits?: { timeout_s?: number; idle_timeout_s?: number; memory_mb?: number; cpus?: number; pids?: number };
   metadata?: Record<string, unknown>;
 }
@@ -61,6 +65,7 @@ export interface RunRecord {
   };
   diagnosis?: Diagnosis;
   warnings?: string[];
+  stream_token_sha256?: string;  // per-run read token, see src/stream.ts
 }
 
 export interface RunEvent {

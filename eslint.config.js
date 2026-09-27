@@ -28,4 +28,8 @@ export default tseslint.config(
     },
   },
   { files: anyBaseline, rules: { '@typescript-eslint/no-explicit-any': 'off' } },
+  // Plain JS that runs inside the room under node (src/adapters/opencode-live.mjs).
+  { files: ['**/*.mjs'], languageOptions: { globals: Object.fromEntries(
+    ['process', 'console', 'Buffer', 'fetch', 'AbortController', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval']
+      .map(g => [g, 'readonly'])) } },
 );

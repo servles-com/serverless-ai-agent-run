@@ -12,10 +12,12 @@
 import { readFileSync, mkdirSync, writeFileSync, appendFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { runAndWait } from '../tests/lib/client.ts';
+import { dogfoodCategory, harnessErrorRun } from './dogfood-lib.ts';
 
 const models = (process.env.SAR_DOGFOOD_MODELS ?? [
-  'openrouter/nvidia/nemotron-3-super-120b-a12b:free',
-  'openrouter/nvidia/nemotron-3.5-lightning:free',
+  // The owner's ladder (Go first). Direct OpenRouter :free models only via
+  // SAR_DOGFOOD_MODELS for comparisons — one account's daily free quota is tiny.
+  'ladder/free',
 ].join(',')).split(',');
 const only = process.env.SAR_DOGFOOD_TASKS?.split(',');
 const tasks = JSON.parse(readFileSync(new URL('../tests/dogfood/tasks.json', import.meta.url), 'utf8'))
@@ -37,11 +39,10 @@ for (const [model, t] of pairs) {
       run = await runAndWait({ agent: 'opencode', model, task: t.task, files: t.files, repo: t.repo, expect: t.expect,
         limits: { timeout_s: timeoutS, idle_timeout_s: Math.min(240, timeoutS) }, metadata: { dogfood: t.name } }, timeoutS + 100);
     } catch (e: any) {
-      run = { id: '-', state: 'HARNESS_ERROR', diagnosis: { category: 'HARNESS_ERROR', summary: e.message } };
+      run = harnessErrorRun(e);
     }
     // An agent that says "done" but produced nothing is the most dangerous failure.
-    let category = run.diagnosis?.category ?? 'OK';
-    if (run.state === 'SUCCEEDED' && !run.result?.artifacts?.length) category = 'SILENT_FAILURE';
+    const category = dogfoodCategory(run);
     const row = {
       ts: new Date().toISOString(), model, task: t.name, run_id: run.id, state: run.state, category,
       seconds: Math.round((Date.now() - started) / 1000), steps: run.result?.steps, tool_calls: run.result?.tool_calls,
