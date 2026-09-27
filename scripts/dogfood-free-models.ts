@@ -14,11 +14,9 @@ import { join, resolve } from 'node:path';
 import { runAndWait, QueueTimeoutError } from '../tests/lib/client.ts';
 
 const models = (process.env.SAR_DOGFOOD_MODELS ?? [
-  // Bench-validated free models (trained-assist free-LLM bench, 2026-09-26);
-  // nemotron-3.5-lightning:free is dead there and timed out here.
-  'openrouter/nvidia/nemotron-3-super-120b-a12b:free',
-  'openrouter/inclusionai/ling-3.0-flash-fin:free',
-  'openrouter/nvidia/nemotron-3-ultra-550b-a55b:free',
+  // The owner's ladder (Go first). Direct OpenRouter :free models only via
+  // SAR_DOGFOOD_MODELS for comparisons — one account's daily free quota is tiny.
+  'ladder/free',
 ].join(',')).split(',');
 const only = process.env.SAR_DOGFOOD_TASKS?.split(',');
 const tasks = JSON.parse(readFileSync(new URL('../tests/dogfood/tasks.json', import.meta.url), 'utf8'))

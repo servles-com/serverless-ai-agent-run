@@ -9,7 +9,7 @@ import { join, resolve } from 'node:path';
 import { runAndWait, QueueTimeoutError } from '../tests/lib/client.ts';
 
 const REPO = process.env.SAR_TIMELINE_REPO ?? 'servles-com/universe-timeline';
-const MODEL = process.env.SAR_TIMELINE_MODEL ?? 'openrouter/nvidia/nemotron-3-super-120b-a12b:free';
+const MODEL = process.env.SAR_TIMELINE_MODEL ?? 'ladder/free';
 const TIMEOUT_S = Number(process.env.SAR_TIMELINE_TIMEOUT_S ?? 900);
 const TOKEN = process.env.GH_TOKEN ?? process.env.GITHUB_TOKEN ?? '';
 const outDir = join(resolve(process.env.SAR_DATA_DIR ?? 'runtime-data'), 'reports');
