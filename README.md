@@ -281,6 +281,7 @@ src/webhooks.ts      подписанные вебхуки по порядку, 
 src/adapters/        opencode (поток JSON-событий), shell (для тестов)
 src/store.ts         раны на диске
 src/creds/           хендлы кредов, файловый бэкенд, брокер с аудитом (ещё не подключено к рану)
+src/gateway.ts       шлюз хоста: токен рана, /proxy/<host>/… с подстановкой креда (ещё не подключено)
 room-image/          образ комнаты (node + opencode + git + python)
 scripts/             bootstrap, сетевая политика, selftest, dogfood, burst, status, machine (SSH), gcp-lab-vm
 deploy/              systemd-юниты, пример secrets
