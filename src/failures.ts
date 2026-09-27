@@ -73,7 +73,8 @@ export function classify(f: Facts): Verdict {
   }
   if (room.timedOut) {
     return fail('TIMED_OUT', 'TIMEOUT', 'Run exceeded limits.timeout_s',
-      [`duration_ms=${room.durationMs}`, `steps=${stats.steps}`, `tool_calls=${stats.toolCalls}`], true,
+      [`duration_ms=${room.durationMs}`, `steps=${stats.steps}`, `tool_calls=${stats.toolCalls}`,
+       `model_ms=${stats.timing.modelMs}`, `tool_ms=${stats.timing.toolMs}`], true,
       stats.steps > 30 ? ['Agent made many steps — probably looping; inspect repeated tool calls'] : ['Raise limits.timeout_s or split the task']);
   }
   if (room.idleKilled) {

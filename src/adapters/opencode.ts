@@ -1,6 +1,7 @@
 // OpenCode adapter: `opencode run --format json` prints one JSON event per line:
 //   step_start | tool_use | text | step_finish | error
 import type { AgentAdapter } from './index.ts';
+import { onStepStart, onStepFinish, onTool } from '../step-timing.ts';
 
 const SYSTEM_HINT = [
   'You are running unattended inside an isolated, disposable sandbox.',
@@ -28,10 +29,12 @@ export const opencodeAdapter: AgentAdapter = {
     switch (ev.type) {
       case 'step_start':
         stats.steps++;
+        onStepStart(stats.timing, ev.timestamp);
         return { type: 'step_start', data: { step: stats.steps } };
       case 'step_finish':
         stats.lastStepReason = part.reason;
         stats.tokens += part.tokens?.total ?? 0;
+        onStepFinish(stats.timing, ev.timestamp);
         return { type: 'step_finish', data: { reason: part.reason, tokens: part.tokens?.total, cost: part.cost } };
       case 'text':
         if (part.text) stats.finalText = part.text;
@@ -40,6 +43,7 @@ export const opencodeAdapter: AgentAdapter = {
         stats.toolCalls++;
         const status = part.state?.status;
         if (status === 'error') stats.toolErrors++;
+        onTool(stats.timing, part.state?.time);
         return { type: 'tool', data: {
           tool: part.tool, status,
           input: truncateJson(part.state?.input, 1500),

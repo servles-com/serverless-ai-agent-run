@@ -5,6 +5,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { config, providerEnvValues } from './config.ts';
 import { adapters, emptyStats } from './adapters/index.ts';
+import { closeOpenStep } from './step-timing.ts';
 import { classify } from './failures.ts';
 import { startRoom, destroyRoom, listRoomContainers, containerName, type RoomHandle } from './rooms.ts';
 import { bus, emit, getRun, saveRun, runDir, runsDir, TERMINAL, type RunRecord, type RunRequest, type RunState } from './store.ts';
@@ -134,6 +135,10 @@ async function execute(id: string): Promise<void> {
   active.set(id, room);
   if (cancelRequested.has(id)) room.cancel();
   const outcome = await room.done;
+  // A step still open when the room stopped (timeout/crash/cancel) never got a
+  // step_finish: close it at kill time so TIMEOUT evidence still splits model
+  // wait from tool execution.
+  closeOpenStep(agentStats.timing, Date.now());
   rec.room = { container: outcome.container, runtime: outcome.runtime, exit_code: outcome.exitCode, oom_killed: outcome.oomKilled };
 
   // --- export (V0: artifacts already live in the run dir via bind mount; we just index them)
@@ -147,7 +152,8 @@ async function execute(id: string): Promise<void> {
   emit(id, 'room.destroyed', { container: outcome.container, duration_ms: outcome.durationMs });
 
   rec.result = { text: agentStats.finalText, artifacts, steps: agentStats.steps, tool_calls: agentStats.toolCalls,
-    tool_errors: agentStats.toolErrors, tokens: agentStats.tokens };
+    tool_errors: agentStats.toolErrors, tokens: agentStats.tokens,
+    model_ms: agentStats.timing.modelMs, tool_ms: agentStats.timing.toolMs, step_timings: agentStats.timing.stepTimings };
   finish(rec, classify({ agent: req.agent ?? 'opencode', room: outcome, stats: agentStats, artifacts, exportError }));
 }
 
