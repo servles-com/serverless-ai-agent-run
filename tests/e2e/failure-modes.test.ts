@@ -37,14 +37,15 @@ test('expect: contract met -> SUCCEEDED', async () => {
 });
 
 test('fail-fast: 3 provider errors in a row -> MODEL_PROVIDER_ERROR in seconds, not at timeout', async () => {
-  const started = Date.now();
   const err = 'level=ERROR message=\\"stream error\\" providerID=openrouter error.error.code=504';
   const run = await runAndWait({ agent: 'shell', limits: { timeout_s: 240, idle_timeout_s: 240 },
     task: `for i in 1 2 3; do echo "${err}" >&2; sleep 1; done; sleep 600` });
   assert.equal(run.state, 'FAILED', explain(run));
   assert.equal(run.diagnosis.category, 'MODEL_PROVIDER_ERROR', explain(run));
   assert.match(run.diagnosis.summary, /Stopped early/);
-  assert.ok(Date.now() - started < 60_000, `took ${Math.round((Date.now() - started) / 1000)}s`);
+  // From the run's own start: on the shared machine it may wait in the queue behind dogfood.
+  const secs = (Date.parse(run.finished_at) - Date.parse(run.started_at)) / 1000;
+  assert.ok(secs < 60, `took ${secs}s after start`);
 });
 
 test('artifact symlink to a host file is neither listed nor served; the regular file is', async () => {
@@ -142,7 +143,10 @@ test('debug bundle explains a failure in one call', async () => {
 
 test('no room survives its run', async () => {
   const { execFileSync } = await import('node:child_process');
-  const left = execFileSync(process.env.SAR_DOCKER_BIN ?? 'docker', ['ps', '-aq', '--filter', 'label=sar.room=1',
-    '--filter', `label=sar.instance=${process.env.SAR_INSTANCE ?? 'main'}`]).toString().trim();
-  assert.equal(left, '', `leftover rooms: ${left}`);
+  // Rooms of runs still in flight (dogfood on the shared machine) are not leftovers.
+  const active = new Set<string>((await api('GET', '/healthz')).body.active ?? []);
+  const left = execFileSync(process.env.SAR_DOCKER_BIN ?? 'docker', ['ps', '-a', '--filter', 'label=sar.room=1',
+    '--filter', `label=sar.instance=${process.env.SAR_INSTANCE ?? 'main'}`, '--format', '{{.Names}} {{.Label "sar.run"}}']).toString()
+    .split('\n').filter(l => l.trim() && !active.has(l.split(' ')[1]));
+  assert.deepEqual(left, [], `leftover rooms: ${left.join(', ')}`);
 });
