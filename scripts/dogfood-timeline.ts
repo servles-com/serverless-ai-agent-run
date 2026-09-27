@@ -94,7 +94,7 @@ await gh(`/issues/${issue.number}/comments`, { method: 'POST', body: JSON.string
 
 const row = {
   ts: new Date().toISOString(), issue: issue.number, title: issue.title, run_id: run.id, state: run.state,
-  category: run.diagnosis?.category ?? 'OK', seconds: Math.round((Date.now() - started) / 1000),
+  category: run.diagnosis?.category ?? 'OK', summary: run.diagnosis?.summary, seconds: Math.round((Date.now() - started) / 1000),
   steps: run.result?.steps, tool_calls: run.result?.tool_calls, pr: pr?.url, files_changed: pr?.files_changed, ci, merged, model: MODEL,
 };
 appendFileSync(history, JSON.stringify(row) + '\n');
