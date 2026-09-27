@@ -293,6 +293,14 @@ docs/                архитектура, безопасность, roadmap, 
 
 ## Claude Code Instructions
 
+- **Модели для агентов — только через LLM ladder владельца** (`ladder/free`, воркер
+  [trained-assist-llm-ladder](https://github.com/trained-assist/trained-assist-llm-ladder):
+  OpenCode Go → Zen / OpenRouter `:free` → дешёвые платные, с ротацией ключей и здоровьем
+  моделей). Токен `LLM_LADDER_TOKEN` лежит в GCP Secret Manager проекта
+  `alesa-personal-assistent` и в `/etc/sar/secrets.env` на машине. Не подключать OpenRouter
+  напрямую как дефолт: квота одного аккаунта кончается за несколько ранов. Это решение
+  настраивали несколько раз — не терять.
+
 - V0 держим минимальным. Требования — из задачи (API + вебхук, изолированные комнаты,
   диагностика падений), а не из раннего мультитенантного драфта. Тенанты, storage
   gateway, KMS и прочий access-control — **потом**, см. ROADMAP.
