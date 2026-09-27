@@ -167,3 +167,38 @@ ZeroCreds, а в контекст модели попадает только `cr
 Честная граница: root на машине SAR в момент выдачи видит значение. Её закрывают
 V1–V4 и разделение машин (K8): креды живут на одной, чужой код исполняется на
 другой.
+
+## Свой vault клиента (BYO), включая российские
+
+Клиент держит креды у себя и выдаёт нашему брокеру **только чтение конкретных
+путей**. Каждое наше чтение видно в его аудите, отозвать он может в любой момент
+(V3). В запуске ссылка выглядит так же, только с префиксом источника:
+`cred:byo/<connection>/<path>`. Подключение к vault клиента само хранится у нас
+как кред.
+
+| Хранилище | Где | Как подключаемся | Аудит на стороне клиента | Приоритет |
+|---|---|---|---|---|
+| **OpenBao / HashiCorp Vault** | любое | Vault API, AppRole или JWT, политика `read` на пути | audit device | v1, один адаптер `vault` |
+| **Deckhouse Stronghold** (Флант, реестр отечественного ПО, ГОСТ) | РФ, on-prem / в k8s | **тот же адаптер `vault`** — API совместим с Vault; namespaces поддерживаются | audit Stronghold | v1, проверить совместимость на стенде |
+| **Yandex Lockbox** | РФ, Yandex Cloud | IAM-токен сервисного аккаунта с ролью на конкретный секрет (`lockbox.payloadViewer`) | Yandex Audit Trails (проверить, пишутся ли чтения payload как data events) | v1.5 |
+| **Selectel Secrets Manager** | РФ, Selectel | REST API с Keystone-токеном проекта | уточнить | v2 |
+| **Cloud.ru Secret Management** (Evolution) | РФ, Cloud.ru | REST API, разграничение доступа | уточнить | v2 |
+| **Пассворк** (self-hosted, API-first, шифрование на клиенте) | РФ, у клиента | REST API; для расшифровки нужен ключ пользователя-сервиса, которого клиент заводит под нас | журнал событий Пассворка | v2, для команд без DevOps |
+| 1Password, Infisical, Bitwarden | вне РФ | service accounts / machine accounts | их аудит | v2 |
+
+Общие правила для всех коннекторов:
+
+- мы получаем **отдельную сервисную учётку** с правом только на чтение заранее
+  согласованных путей, без права на запись и листинг чужого;
+- значение читается в момент доставки и не кэшируется дольше рана;
+- если доступ отозван, ран получает `CREDENTIAL_REVOKED`, а не молчит;
+- на каждый коннектор есть e2e-тест против стенда (Stronghold и OpenBao в
+  docker, Lockbox — с тестовым облаком).
+
+Источники: [Stronghold: сравнение с Vault CE](https://blog.deckhouse.ru/ne-prosto-fork-sravnenie-deckhouse-stronghold-s-hashicorp-vault-ce/),
+[модуль Stronghold](https://deckhouse.ru/modules/stronghold/),
+[Yandex Lockbox вне Yandex Cloud](https://habr.com/ru/articles/730750/),
+[Selectel Secrets Manager API](https://developers.selectel.com/docs/selectel-cloud-platform/secrets_manager_api/),
+[Cloud.ru Secret Management](https://cloud.ru/docs/scsm/ug/index.html),
+[Пассворк](https://passwork.pro/),
+[обзор рынка Secret Management в РФ](https://www.anti-malware.ru/analytics/Market_Analysis/Secrets-management-systems).
