@@ -115,7 +115,8 @@ test('webhook agent_events "coalesced": ≤ 1 agent delivery per 2 s, nothing lo
     const types: string[] = hook.events.map(e => e.type);
     assert.ok(!types.includes('agent.stdout'), 'raw agent events are not delivered one by one');
     const batches = hook.events.filter(e => e.type === 'agent.coalesced');
-    assert.ok(batches.length >= 2 && batches.length <= 5, `batches: ${batches.length}`);
+    const maxBatches = Math.ceil((Date.parse(run.finished_at) - Date.parse(run.started_at)) / 2000) + 2;
+    assert.ok(batches.length >= 2 && batches.length <= maxBatches, `batches: ${batches.length}, max ${maxBatches}`);
     const covered = batches.reduce((n, e) => n + e.data.count, 0);
     assert.equal(covered, 40, 'every agent event is counted in some batch');
     const times = batches.map(e => e.received_at as number);

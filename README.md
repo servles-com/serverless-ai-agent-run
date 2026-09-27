@@ -194,10 +194,12 @@ opencode ретраил — и тишины никогда не было дос�
 Все эндпоинты кроме `/healthz` — с `Authorization: Bearer $SAR_API_TOKEN`.
 
 ```http
-POST /runs                        → 202 {id, state, links}
+POST /runs                        → 202 {id, state, stream_token, links}
 GET  /runs                        последние раны
 GET  /runs/{id}                   состояние, результат, диагноз
 GET  /runs/{id}/events            JSON; ?after=<seq>; SSE при ?follow=1
+GET  /runs/{id}/stream            SSE: ?types=text,tool,step,state,stdout,stderr,error,log; ?format=transcript; heartbeat; Last-Event-ID
+GET  /runs/{id}/transcript        markdown-транскрипт сессии (?format=text — plain)
 GET  /runs/{id}/debug             всё для разбора падения одним ответом
 GET  /runs/{id}/artifacts         список
 GET  /runs/{id}/artifacts/{path}  скачать
@@ -225,6 +227,14 @@ GET  /healthz                     docker, runtime, образ, очередь
 `FAILED` / `EXPECTATION_NOT_MET` со списком невыполненного, а не тихий `SUCCEEDED`. `secrets` — имена из серверного `/etc/sar/secrets.env`;
 в комнату попадают только запрошенные. Вебхук: заголовок
 `X-SAR-Signature: sha256=HMAC(secret, body)`, последнее событие — `run.completed`.
+`webhook.agent_events: "coalesced"` — агентные события пачкой `agent.coalesced` не чаще раза в 2 с
+(`count`, `counts`, `last_text`, `last_tool`, до 50 последних событий).
+
+**Стриминг ([src/stream.ts](src/stream.ts), #97 фаза 1).** `POST /runs` отдаёт `stream_token` — токен
+только на чтение и только этого рана: `events`, `stream`, `transcript`, `artifacts` (403 на всё остальное,
+в том числе на другой ран). Хранится только sha256, живёт до удаления рана. Для `EventSource` без заголовков —
+`?access_token=<stream_token>` (мастер-ключ так не принимается). Секреты вычищены до fan-out (`store.emit`).
+Сейчас построчно: текст и tool call видны, когда opencode их завершил; дельты — фаза 2.
 
 ---
 
