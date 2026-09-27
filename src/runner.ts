@@ -7,11 +7,11 @@ import { promisify } from 'node:util';
 import { config } from './config.ts';
 import { adapters, emptyStats } from './adapters/index.ts';
 import { closeOpenStep } from './step-timing.ts';
-import { classify, newFailFast, observeFailFast } from './failures.ts';
+import { classify, credentialVerdict, newFailFast, observeFailFast } from './failures.ts';
 import { startRoom, destroyRoom, listRoomContainers, containerName } from './rooms.ts';
 import { emit, getRun, saveRun, runDir, runsDir, TERMINAL, type RunRecord, type RunState } from './store.ts';
 import { attachRoom, isCancelRequested, release, requestOf, startQueue, type Completion } from './queue.ts';
-import { hydrate, roomSpec } from './run-env.ts';
+import { hydrate, roomSpec, resolveCredentialEnv, CredentialError } from './run-env.ts';
 import { listFiles, settleDeliverables } from './deliverables.ts';
 import { scrub } from './redact.ts';
 
@@ -46,6 +46,13 @@ async function execute(id: string): Promise<void> {
       retryable: true, hints: ['Check repo URL/ref and that a GITHUB_TOKEN secret was requested for private repos'] } });
   }
   if (isCancelRequested(id)) return finish(rec, { state: 'CANCELLED', warnings: [] });
+  let credEnv: Record<string, string>;
+  try {
+    credEnv = resolveCredentialEnv(id, req);
+  } catch (e) {
+    if (e instanceof CredentialError) return finish(rec, credentialVerdict([{ code: e.code, ref: e.ref }]));
+    throw e;
+  }
 
   // --- execute
   const adapter = adapters[req.agent ?? 'opencode'];
@@ -66,7 +73,7 @@ async function execute(id: string): Promise<void> {
       if (line.trim()) emit(id, 'room.stderr', { line: line.slice(0, 2000) });
       if (observeFailFast(failFast, { stderr: line })) stopEarly();
     },
-  });
+  }, credEnv);
   rec.room = { container: containerName(id), runtime: config.roomRuntime || 'runc' };
   setState(rec, 'RUNNING', { model: req.agent === 'shell' ? undefined : model, limits: spec.limits });
   console.log(`run ${id} RUNNING agent=${req.agent} ${req.agent === 'shell' ? '' : `model=${model} `}task=${JSON.stringify(req.task.slice(0, 80))}`);

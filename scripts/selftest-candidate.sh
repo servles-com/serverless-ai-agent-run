@@ -48,6 +48,6 @@ done
 curl -fsS "http://127.0.0.1:$PORT/healthz"; echo
 
 echo "=== selftest against the candidate"
-SAR_URL=http://127.0.0.1:$PORT SAR_API_TOKEN=$TOKEN SAR_INSTANCE=$INSTANCE SAR_SECRETS_FILE=$DATA/secrets.env \
+SAR_URL=http://127.0.0.1:$PORT SAR_API_TOKEN=$TOKEN SAR_INSTANCE=$INSTANCE SAR_SECRETS_FILE=$DATA/secrets.env SAR_DATA_DIR=$DATA \
   bash scripts/selftest.sh 2>&1 | tee "$REPORT/selftest.log"
 exit "${PIPESTATUS[0]}"

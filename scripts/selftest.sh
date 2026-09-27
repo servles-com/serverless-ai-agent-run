@@ -16,6 +16,8 @@ step() { echo; echo "=== $1"; shift; "$@" || status=1; }
 step "unit: failure classifier" node --test tests/unit/*.test.ts
 step "e2e: failure modes"       node --test --test-concurrency=1 tests/e2e/failure-modes.test.ts
 step "e2e: isolation"           node --test --test-concurrency=1 tests/e2e/isolation.test.ts
+step "e2e: batches"           node --test --test-concurrency=1 tests/e2e/batches.test.ts
+step "e2e: credentials"       node --test --test-concurrency=1 tests/e2e/credentials.test.ts
 step "e2e: secret redaction"    node --test --test-concurrency=1 tests/e2e/redaction.test.ts
 step "e2e: streaming"           node --test --test-concurrency=1 tests/e2e/stream.test.ts
 if [ "${SAR_LIVE:-0}" = "1" ]; then
