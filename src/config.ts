@@ -55,6 +55,9 @@ export const config = {
   providerEnv: ['LLM_LADDER_TOKEN', 'OPENROUTER_API_KEY'],
   secrets: loadSecrets(process.env.SAR_SECRETS_FILE),
 
+  // Fail fast after this many provider errors in a row without agent progress (0 = off).
+  failFastProviderErrors: num('SAR_FAILFAST_PROVIDER_ERRORS', 3),
+
   // Host-side PRs: token used only by the host (never passed to rooms) and the
   // repos it may push to ("owner/repo", comma-separated).
   githubPushToken: process.env.SAR_GITHUB_PUSH_TOKEN ?? '',
