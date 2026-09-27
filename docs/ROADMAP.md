@@ -20,6 +20,15 @@ Scope revised 2026-09-27, see `docs/2026-09-27 draft review and V0 launch plan.m
 - [x] CI: typecheck + unit tests on every PR
 - [ ] self-hosted runner on the VM: selftest per PR
 
+## V0.3 — ближайшее, по итогам интервью 2026-09-27
+
+- [ ] контракт результата в запросе (`expect`) → `EXPECTATION_NOT_MET`; эвристики тихого провала
+- [ ] квота диска `/workspace`
+- [ ] LLM-прокси на хосте: ключи провайдера (в т.ч. пользовательские, BYOK) вне комнаты, учёт токенов/стоимости
+- [ ] API-ключи на пользователя, owner у рана, квоты, rate limit
+- [ ] публичный HTTPS + SSRF-фильтр вебхуков; ключи для фронтенда
+- [ ] адаптер `custom` (свой образ/команда)
+
 ## V0.5 — persistent storage
 
 - [ ] GCS bucket in the same region as the VM
