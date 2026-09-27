@@ -34,7 +34,7 @@ for (const [model, t] of pairs) {
     const started = Date.now();
     let run: any;
     try {
-      run = await runAndWait({ agent: 'opencode', model, task: t.task, files: t.files, repo: t.repo,
+      run = await runAndWait({ agent: 'opencode', model, task: t.task, files: t.files, repo: t.repo, expect: t.expect,
         limits: { timeout_s: timeoutS, idle_timeout_s: Math.min(240, timeoutS) }, metadata: { dogfood: t.name } }, timeoutS + 100);
     } catch (e: any) {
       run = { id: '-', state: 'HARNESS_ERROR', diagnosis: { category: 'HARNESS_ERROR', summary: e.message } };

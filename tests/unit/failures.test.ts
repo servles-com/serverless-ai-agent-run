@@ -84,3 +84,11 @@ test('every category in failures.ts is covered by a test', async () => {
   const missing = [...categories].filter(c => !self.includes(`'${c}'`));
   assert.deepEqual(missing, [], `categories without a unit test: ${missing.join(', ')}`);
 });
+test('no-output checks apply to any non-shell agent, not only opencode', () =>
+  assert.equal(cat(facts({}, { parsedLines: 0, steps: 0, finalText: undefined }, 'claude-code')), 'AGENT_NO_OUTPUT'));
+test('result contract categories (details in expect.test.ts)', async () => {
+  const { checkDeliverable } = await import('../../src/failures.ts');
+  const d = { agent: 'opencode', text: '', artifacts: [], pullRequest: false, parsesAsJson: () => true };
+  assert.equal(checkDeliverable(undefined, d, [])?.diagnosis?.category, 'NO_DELIVERABLE');
+  assert.equal(checkDeliverable({ artifacts: ['x'] }, d, [])?.diagnosis?.category, 'EXPECTATION_NOT_MET');
+});
