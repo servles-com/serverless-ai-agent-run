@@ -11,7 +11,7 @@ log() { echo -e "\n=== $*"; }
 
 log "base packages"
 apt-get update -qq
-apt-get install -y -qq ca-certificates curl gnupg git jq iptables >/dev/null
+apt-get install -y -qq ca-certificates curl gnupg git jq iptables gh >/dev/null
 
 # Small lab hosts (1 GB RAM) need swap to build the image and run opencode.
 if [ "$(swapon --show | wc -l)" -eq 0 ] && [ "$(free -m | awk '/Mem:/{print $2}')" -lt 3000 ]; then
@@ -65,6 +65,7 @@ cp /opt/sar/deploy/*.service /opt/sar/deploy/*.timer /etc/systemd/system/
 chmod +x /opt/sar/scripts/*.sh
 systemctl daemon-reload
 systemctl enable --now sar-netpolicy.service sar.service sar-dogfood.timer
+systemctl restart sar.service                  # pick up new code on re-runs
 
 sleep 2
 log "health"
