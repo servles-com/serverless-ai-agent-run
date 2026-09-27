@@ -7,8 +7,21 @@ cd "$(dirname "$0")/.."
 if [ -z "${SAR_SSH:-}" ]; then exec bash scripts/gcp-lab-vm.sh "$@"; fi
 SSH=(ssh -o StrictHostKeyChecking=accept-new "$SAR_SSH")
 
+# Shared machine: deploy only what is on origin/main. Branches are verified by the
+# required `selftest-vm` CI check before merge; ad-hoc branch deploys overwrite
+# each other between parallel sessions (2026-09-28). Override: SAR_DEPLOY_ANY=1.
+deploy_guard() {
+  [ "${SAR_DEPLOY_ANY:-0}" = 1 ] && return 0
+  local repo; repo="$(dirname "$0")/.."
+  git -C "$repo" fetch -q origin main
+  if [ "$(git -C "$repo" rev-parse HEAD)" != "$(git -C "$repo" rev-parse origin/main)" ]; then
+    echo "refusing to deploy: HEAD is not origin/main (checkout main && git pull, or SAR_DEPLOY_ANY=1)" >&2; exit 1
+  fi
+}
+
 case "${1:-}" in
   bootstrap)   # ship committed HEAD (private repo friendly) and (re)deploy
+    deploy_guard
     git archive --format=tar.gz HEAD | "${SSH[@]}" \
       'rm -rf /tmp/sar-src && mkdir -p /tmp/sar-src && tar -xzf - -C /tmp/sar-src && sudo SAR_LOCAL_SRC=/tmp/sar-src bash /tmp/sar-src/scripts/vm-bootstrap.sh' ;;
   ssh)      shift; "${SSH[@]}" "$@" ;;
