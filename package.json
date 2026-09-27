@@ -13,7 +13,8 @@
     "selftest": "bash scripts/selftest.sh",
     "dogfood": "node scripts/dogfood-free-models.ts",
     "lint": "eslint .",
-    "test:coverage": "node --test --experimental-test-coverage --test-coverage-include=src/failures.ts --test-coverage-lines=90 --test-coverage-branches=90 --test-coverage-functions=90 tests/unit/*.test.ts"
+    "test:coverage": "node --test --experimental-test-coverage --test-coverage-include=src/failures.ts --test-coverage-lines=90 --test-coverage-branches=90 --test-coverage-functions=90 tests/unit/*.test.ts",
+    "ci:guards": "node scripts/ci/run.ts"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.5",
