@@ -1,0 +1,10 @@
+[Unit]
+Description=serverless-ai-agent-run: dogfood batch against free models
+After=sar.service
+
+[Service]
+Type=oneshot
+User=sar
+EnvironmentFile=/etc/sar/sar.env
+WorkingDirectory=/opt/sar
+ExecStart=/usr/bin/node scripts/dogfood-free-models.ts

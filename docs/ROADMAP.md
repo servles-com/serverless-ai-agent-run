@@ -2,46 +2,21 @@
 
 ## V0 — local isolation laboratory
 
-Goal: prove the execution-room model before integrating real product traffic.
+Goal: prove the execution-room model and the failure-diagnosis loop on one VM.
+Scope revised 2026-09-27, see `docs/2026-09-27 draft review and V0 launch plan.md`.
 
-### 1. Minimal control API
-
-- [ ] `POST /runs`
-- [ ] opaque `run_id`
-- [ ] internal fake `tenant_id`
-- [ ] run state machine
-- [ ] `GET /runs/{id}`
-- [ ] structured events
-
-No business-domain logic.
-
-### 2. Room lifecycle
-
-- [ ] install/configure gVisor on the test VM
-- [ ] fresh room per run
-- [ ] unprivileged user
-- [ ] mount only the run workspace
-- [ ] memory/CPU/PID/time limits
-- [ ] destroy room after terminal state
-- [ ] verify background processes disappear
-
-### 3. First agent adapter
-
-- [ ] OpenCode adapter
-- [ ] free-model development profile
-- [ ] provide task text and workspace
-- [ ] capture stdout/stderr/events
-- [ ] export one simple artifact
-
-### 4. Security suite
-
-- [ ] fake tenant A
-- [ ] fake tenant B with a known secret marker
-- [ ] deterministic escape tests
-- [ ] network-isolation tests
-- [ ] resource-exhaustion tests
-- [ ] adversarial LLM test trying to steal tenant B marker
-- [ ] CI fails if the marker is ever exposed
+- [x] `POST /runs`, `GET /runs/{id}`, events (JSON + SSE), artifacts, cancel
+- [x] run state machine + structured events (`events.jsonl`)
+- [x] signed webhooks
+- [x] failure classifier + `/debug` bundle
+- [x] fresh room per run: gVisor, unprivileged, cap-drop, mem/CPU/PID/time/idle limits
+- [x] room destroyed after every terminal state; orphan reconciliation on restart
+- [x] OpenCode adapter on free models
+- [x] deterministic failure-mode + isolation suites (`scripts/selftest.sh`)
+- [x] dogfood timer on free models
+- [ ] selftest green on the lab VM with `runsc`
+- [ ] failure → GitHub issue automation from dogfood
+- [ ] self-hosted runner on the VM: selftest per PR
 
 ## V0.5 — persistent storage
 

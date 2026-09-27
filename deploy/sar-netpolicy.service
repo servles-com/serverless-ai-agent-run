@@ -1,0 +1,13 @@
+[Unit]
+Description=serverless-ai-agent-run: room network policy
+After=docker.service
+Requires=docker.service
+Before=sar.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/opt/sar/scripts/room-network-policy.sh
+
+[Install]
+WantedBy=multi-user.target

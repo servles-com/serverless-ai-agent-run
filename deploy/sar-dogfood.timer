@@ -1,0 +1,10 @@
+[Unit]
+Description=Run the dogfood batch every 3 hours
+
+[Timer]
+OnBootSec=15min
+OnUnitActiveSec=3h
+Persistent=true
+
+[Install]
+WantedBy=timers.target

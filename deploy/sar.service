@@ -1,0 +1,16 @@
+[Unit]
+Description=serverless-ai-agent-run execution API
+After=docker.service network-online.target
+Requires=docker.service
+
+[Service]
+User=sar
+Group=sar
+EnvironmentFile=/etc/sar/sar.env
+WorkingDirectory=/opt/sar
+ExecStart=/usr/bin/node src/server.ts
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

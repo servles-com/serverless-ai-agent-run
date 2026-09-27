@@ -1,0 +1,20 @@
+{
+  "name": "serverless-ai-agent-run",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Isolated, ephemeral AI-agent runs on a VM behind an HTTP API with webhooks",
+  "engines": { "node": ">=23.6" },
+  "scripts": {
+    "start": "node src/server.ts",
+    "typecheck": "tsc --noEmit",
+    "test:unit": "node --test tests/unit/*.test.ts",
+    "test:e2e": "node --test --test-concurrency=1 tests/e2e/*.test.ts",
+    "selftest": "bash scripts/selftest.sh",
+    "dogfood": "node scripts/dogfood-free-models.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.0"
+  }
+}
