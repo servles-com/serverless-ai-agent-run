@@ -17,6 +17,7 @@
 > гоняет задачи на бесплатных моделях. Один оператор (один API-токен).
 > Трекинг: [docs/requirements-log.md](docs/requirements-log.md) ·
 > безопасность: [docs/security-checklist.md](docs/security-checklist.md) ·
+> креды: [docs/credentials-and-secret-storage-design.md](docs/credentials-and-secret-storage-design.md) ·
 > CI/CD и логи: [docs/ci-cd-and-logging-development-plan.md](docs/ci-cd-and-logging-development-plan.md) ·
 > планы: [docs/ROADMAP.md](docs/ROADMAP.md) ·
 > потребности пользователя: [docs/user-needs-discovery.md](docs/user-needs-discovery.md)
