@@ -36,3 +36,18 @@ No `SILENT_FAILURE` (agent claims success with no artifacts) in this batch.
 - API token: `/etc/sar/sar.env` on the VM; API only on `127.0.0.1:8787` → use `scripts/gcp-lab-vm.sh tunnel`.
 - Issue filing from dogfood is wired but inactive until `GH_TOKEN` is set in `/etc/sar/dogfood.env` (not secrets.env — rooms can request those).
 - Dogfood timer: every 3 h; reports in `/var/lib/sar/reports/`.
+
+## Burst mode (every 5 min, 2 random runs, 240 s timeout) — first 35 min
+
+19:20–19:55 UTC: 14 runs, 11 OK, 2 TIMEOUT, 1 MODEL_PROVIDER_ERROR.
+
+- The new provider-retry classification fired on real traffic (`big-output`, lightning).
+- Remaining TIMEOUTs are genuine: `nemotron-3.5-lightning` spends 60–90 s per model
+  step with no provider errors, so 2–3 steps exhaust 240 s. Correct category; a
+  useful refinement is to split time into *model wait* vs *tool execution* in the
+  evidence, so "slow model" and "slow command" are distinguishable at a glance.
+- Traps behaved: `interactive-trap` (npm init) OK — no IDLE_STALL yet; `vague`
+  ("Make it better.") produced an artifact, so no SILENT_FAILURE yet.
+- `nemotron-3-super` is the reliable one: every run OK, 20–75 s.
+- Logs: everything needed was in the run dir; the service journal had no per-run
+  lines — added (one line per start/finish).
