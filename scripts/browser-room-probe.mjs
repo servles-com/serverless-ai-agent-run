@@ -1,6 +1,7 @@
 // Spike probe for the browser room image (issue #89): runs INSIDE the room.
 // Launches headless Chromium, opens a page, takes a screenshot into /artifacts,
 // prints timings and cgroup memory as one JSON line.
+/* global process, console, performance -- node globals; this file runs in the room, outside tsc */
 import { chromium } from 'playwright';
 import { readFileSync, statSync } from 'node:fs';
 
