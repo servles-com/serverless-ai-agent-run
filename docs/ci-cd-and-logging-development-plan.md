@@ -32,7 +32,8 @@ push/PR ─► L1 статика (GitHub, ~1 мин) ─► L2 рантайм н
 ### Сейчас (есть)
 
 - GitHub Actions `ci`: typecheck, unit (18), `bash -n` скриптов.
-- `selftest.sh` на VM: failure modes (13), изоляция (11 проб), живой opencode — **руками**.
+- `selftest.sh` на VM: failure modes (13), изоляция (11 проб), живой opencode — руками после деплоя.
+- L2 (C3): self-hosted runner на машине, `selftest-vm` гоняет `scripts/selftest-candidate.sh` на каждый PR (≈2 мин).
 - Деплой: `machine.sh bootstrap` — **руками**, без проверки статуса коммита.
 - Branch protection `main`: PR + зелёный `check` обязательны (с 2026-09-27).
 

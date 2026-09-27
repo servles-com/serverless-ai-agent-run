@@ -16,7 +16,7 @@ REPORT=${SAR_CI_REPORT_DIR:-$PWD/ci-report}
 TOKEN=$(openssl rand -hex 24)
 SERVER_PID=
 
-# shellcheck disable=SC2329  # invoked by the EXIT trap
+# shellcheck disable=SC2317,SC2329  # invoked by the EXIT trap
 cleanup() {
   set +e
   [ -n "$SERVER_PID" ] && kill "$SERVER_PID" 2>/dev/null && wait "$SERVER_PID" 2>/dev/null
