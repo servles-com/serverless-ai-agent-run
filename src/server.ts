@@ -14,7 +14,7 @@ import { createReadStream, existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { timingSafeEqual } from 'node:crypto';
 import { config } from './config.ts';
-import { bus, createRun, getRun, listRuns, readEvents, runDir, TERMINAL, type RunEvent } from './store.ts';
+import { bus, createRun, getRun, listRuns, readEvents, runDir, TERMINAL, type RunEvent, type RunRecord } from './store.ts';
 import { cancel, enqueue, gcOldRuns, reconcileOnStartup, stats, validateRequest, listFiles } from './runner.ts';
 import { dockerHealth } from './rooms.ts';
 import { openInside } from './safe-files.ts';
@@ -66,6 +66,78 @@ function streamEvents(req: IncomingMessage, res: ServerResponse, id: string, aft
   req.on('close', () => { bus.off(id, onEv); clearInterval(ping); });
 }
 
+// Route table. `:id` is a run id: the run is loaded (404 "run not found" if missing)
+// before any /runs/<id>/... route is matched. A trailing `*` matches the rest of the path.
+// Feature modules add their routes with addRoute().
+interface RunCtx { req: IncomingMessage; res: ServerResponse; url: URL; rest: string[]; id: string; rec: RunRecord; dir: string }
+type Handler = (c: RunCtx) => unknown;
+interface Route { method: string; path: string[]; handler: Handler }
+const routes: Route[] = [];
+
+export function addRoute(method: string, path: string, handler: Handler): void {
+  routes.push({ method, path: path.split('/').filter(Boolean), handler });
+}
+
+function match(pattern: string[], parts: string[]): string[] | undefined {
+  const star = pattern.at(-1) === '*';
+  const fixed = star ? pattern.slice(0, -1) : pattern;
+  if (parts.length < fixed.length || (!star && parts.length !== fixed.length)) return undefined;
+  if (!fixed.every((p, i) => p === ':id' || p === parts[i])) return undefined;
+  return parts.slice(fixed.length);
+}
+
+addRoute('GET', '/runs', ({ res, url }) => send(res, 200, listRuns(Number(url.searchParams.get('limit') ?? 50)).map(r => ({
+  id: r.id, state: r.state, agent: r.request.agent, category: r.diagnosis?.category, created_at: r.created_at,
+  task: r.request.task.slice(0, 120) }))));
+
+addRoute('POST', '/runs', async ({ req, res }) => {
+  const body = await readBody(req);
+  body.agent ??= 'opencode';
+  const err = validateRequest(body);
+  if (err) return send(res, 400, { error: err });
+  const rec = createRun(body);
+  enqueue(rec, body);
+  return send(res, 202, { id: rec.id, state: rec.state, links: {
+    self: `/runs/${rec.id}`, events: `/runs/${rec.id}/events`, debug: `/runs/${rec.id}/debug`, artifacts: `/runs/${rec.id}/artifacts` } });
+});
+
+addRoute('GET', '/runs/:id', ({ res, rec }) => send(res, 200, rec));
+
+addRoute('POST', '/runs/:id/cancel/*', ({ res, id }) => send(res, cancel(id) ? 202 : 409, { id, cancel_requested: true }));
+
+addRoute('GET', '/runs/:id/events/*', ({ req, res, url, id }) => {
+  const after = Number(url.searchParams.get('after') ?? req.headers['last-event-id'] ?? 0);
+  if (url.searchParams.get('follow') === '1' || (req.headers.accept ?? '').includes('text/event-stream')) {
+    return streamEvents(req, res, id, after);
+  }
+  return send(res, 200, readEvents(id, after));
+});
+
+addRoute('GET', '/runs/:id/debug/*', ({ res, id, rec, dir }) => {
+  const events = readEvents(id);
+  return send(res, 200, {
+    run: rec,
+    diagnosis: rec.diagnosis ?? null,
+    counts: events.reduce<Record<string, number>>((a, e) => (a[e.type] = (a[e.type] ?? 0) + 1, a), {}),
+    last_events: events.filter(e => e.type !== 'room.stderr').slice(-40),
+    stderr_tail: tail(join(dir, 'room', 'stderr.log'), 60),
+    stdout_tail: tail(join(dir, 'room', 'stdout.log'), 20),
+    docker: existsSync(join(dir, 'room', 'docker-args.json')) ? JSON.parse(readFileSync(join(dir, 'room', 'docker-args.json'), 'utf8')) : null,
+    room_state: existsSync(join(dir, 'room', 'inspect.json')) ? JSON.parse(readFileSync(join(dir, 'room', 'inspect.json'), 'utf8')).State : null,
+    workspace_files: listFiles(join(dir, 'workspace')).filter(f => !f.startsWith('.git/')).slice(0, 200),
+    run_dir: dir,
+  });
+});
+
+addRoute('GET', '/runs/:id/artifacts/*', ({ res, rest, dir }) => {
+  const root = join(dir, 'artifacts');
+  if (rest.length === 0) return send(res, 200, listFiles(root));
+  const fd = openInside(root, decodeURIComponent(rest.join('/')));
+  if (fd === undefined) return send(res, 404, { error: 'artifact not found' });
+  res.writeHead(200, { 'content-type': 'application/octet-stream' });
+  return void createReadStream('', { fd }).pipe(res);
+});
+
 async function handle(req: IncomingMessage, res: ServerResponse) {
   const url = new URL(req.url ?? '/', 'http://x');
   const parts = url.pathname.split('/').filter(Boolean);
@@ -76,69 +148,17 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
   }
   if (!authorized(req)) return send(res, 401, { error: 'unauthorized' });
 
-  if (parts[0] !== 'runs') return send(res, 404, { error: 'not found' });
+  const id = parts[0] === 'runs' ? parts[1] : undefined;
+  const rec = id === undefined ? undefined : getRun(id);
+  if (id !== undefined && !rec) return send(res, 404, { error: 'run not found' });
 
-  if (parts.length === 1) {
-    if (req.method === 'GET') {
-      return send(res, 200, listRuns(Number(url.searchParams.get('limit') ?? 50)).map(r => ({
-        id: r.id, state: r.state, agent: r.request.agent, category: r.diagnosis?.category, created_at: r.created_at,
-        task: r.request.task.slice(0, 120) })));
-    }
-    if (req.method === 'POST') {
-      const body = await readBody(req);
-      body.agent ??= 'opencode';
-      const err = validateRequest(body);
-      if (err) return send(res, 400, { error: err });
-      const rec = createRun(body);
-      enqueue(rec, body);
-      return send(res, 202, { id: rec.id, state: rec.state, links: {
-        self: `/runs/${rec.id}`, events: `/runs/${rec.id}/events`, debug: `/runs/${rec.id}/debug`, artifacts: `/runs/${rec.id}/artifacts` } });
-    }
+  for (const r of routes) {
+    if (r.method !== req.method) continue;
+    const rest = match(r.path, parts);
+    if (rest) return r.handler({ req, res, url, rest, id: id!, rec: rec!, dir: id === undefined ? '' : runDir(id) });
   }
-
-  const id = parts[1];
-  const rec = getRun(id);
-  if (!rec) return send(res, 404, { error: 'run not found' });
-  const dir = runDir(id);
-
-  if (req.method === 'GET' && parts.length === 2) return send(res, 200, rec);
-
-  if (req.method === 'POST' && parts[2] === 'cancel') return send(res, cancel(id) ? 202 : 409, { id, cancel_requested: true });
-
-  if (req.method === 'GET' && parts[2] === 'events') {
-    const after = Number(url.searchParams.get('after') ?? req.headers['last-event-id'] ?? 0);
-    if (url.searchParams.get('follow') === '1' || (req.headers.accept ?? '').includes('text/event-stream')) {
-      return streamEvents(req, res, id, after);
-    }
-    return send(res, 200, readEvents(id, after));
-  }
-
-  if (req.method === 'GET' && parts[2] === 'debug') {
-    const events = readEvents(id);
-    return send(res, 200, {
-      run: rec,
-      diagnosis: rec.diagnosis ?? null,
-      counts: events.reduce<Record<string, number>>((a, e) => (a[e.type] = (a[e.type] ?? 0) + 1, a), {}),
-      last_events: events.filter(e => e.type !== 'room.stderr').slice(-40),
-      stderr_tail: tail(join(dir, 'room', 'stderr.log'), 60),
-      stdout_tail: tail(join(dir, 'room', 'stdout.log'), 20),
-      docker: existsSync(join(dir, 'room', 'docker-args.json')) ? JSON.parse(readFileSync(join(dir, 'room', 'docker-args.json'), 'utf8')) : null,
-      room_state: existsSync(join(dir, 'room', 'inspect.json')) ? JSON.parse(readFileSync(join(dir, 'room', 'inspect.json'), 'utf8')).State : null,
-      workspace_files: listFiles(join(dir, 'workspace')).filter(f => !f.startsWith('.git/')).slice(0, 200),
-      run_dir: dir,
-    });
-  }
-
-  if (req.method === 'GET' && parts[2] === 'artifacts') {
-    const root = join(dir, 'artifacts');
-    if (parts.length === 3) return send(res, 200, listFiles(root));
-    const fd = openInside(root, decodeURIComponent(parts.slice(3).join('/')));
-    if (fd === undefined) return send(res, 404, { error: 'artifact not found' });
-    res.writeHead(200, { 'content-type': 'application/octet-stream' });
-    return void createReadStream('', { fd }).pipe(res);
-  }
-
-  send(res, 404, { error: 'not found' });
+  // Other methods on /runs answered "run not found" before the table; kept as is.
+  send(res, 404, { error: parts[0] === 'runs' && parts.length === 1 ? 'run not found' : 'not found' });
 }
 
 async function main() {
