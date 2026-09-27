@@ -57,6 +57,13 @@ fi
 [ -f /etc/sar/secrets.env ] || cp /opt/sar/deploy/secrets.env.example /etc/sar/secrets.env
 chown root:sar /etc/sar/*.env && chmod 640 /etc/sar/*.env
 
+log "run volume helper (per-run disk quota)"
+# Root-owned copy: /opt/sar is owned by sar, so the sudo target must not live there.
+install -o root -g root -m 0755 /opt/sar/scripts/sar-run-volume.sh /usr/local/sbin/sar-run-volume
+echo 'sar, ci ALL=(root) NOPASSWD: /usr/local/sbin/sar-run-volume' > /etc/sudoers.d/sar-run-volume
+chmod 440 /etc/sudoers.d/sar-run-volume && visudo -cqf /etc/sudoers.d/sar-run-volume
+grep -q '^SAR_DEFAULT_DISK_MB=' /etc/sar/sar.env || echo 'SAR_DEFAULT_DISK_MB=4096' >> /etc/sar/sar.env
+
 log "room image"
 docker build -q -t sar-room-opencode:latest /opt/sar/room-image
 

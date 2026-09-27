@@ -23,6 +23,7 @@ cleanup() {
   docker ps -aq --filter label=sar.room=1 --filter "label=sar.instance=$INSTANCE" | xargs -r docker rm -f >/dev/null
   mkdir -p "$REPORT" && cp "$DATA/server.log" "$REPORT/" 2>/dev/null
   docker rmi -f "$IMAGE" >/dev/null 2>&1
+  for d in "$DATA"/runs/run_*; do [ -e "$d/volume.img" ] && sudo -n /usr/local/sbin/sar-run-volume release "$d"; done
   rm -rf "$DATA"
 }
 trap cleanup EXIT
@@ -31,13 +32,16 @@ rm -rf "$DATA" && mkdir -p "$DATA" "$REPORT"
 # A dummy secret so the redaction suite has something to redact. Real secrets never reach CI.
 echo "CI_DUMMY_SECRET=$(openssl rand -hex 16)" > "$DATA/secrets.env"
 
+# Disk quota needs the root helper installed by vm-bootstrap.sh; without it the quota probe is skipped.
+DISK_MB=0; [ -x /usr/local/sbin/sar-run-volume ] && DISK_MB=${SAR_CI_DISK_MB:-1024}
+
 echo "=== build room image $IMAGE"
 docker build -q -t "$IMAGE" room-image
 
 echo "=== start candidate on 127.0.0.1:$PORT (instance $INSTANCE)"
 SAR_API_TOKEN=$TOKEN SAR_HOST=127.0.0.1 SAR_PORT=$PORT SAR_DATA_DIR=$DATA \
   SAR_ROOM_RUNTIME=${SAR_CI_RUNTIME:-runsc} SAR_ROOM_NETWORK=sar-rooms SAR_ROOM_IMAGE=$IMAGE \
-  SAR_INSTANCE=$INSTANCE SAR_SECRETS_FILE=$DATA/secrets.env SAR_MAX_ROOMS=1 \
+  SAR_INSTANCE=$INSTANCE SAR_SECRETS_FILE=$DATA/secrets.env SAR_MAX_ROOMS=1 SAR_DEFAULT_DISK_MB=$DISK_MB \
   node src/server.ts > "$DATA/server.log" 2>&1 &
 SERVER_PID=$!
 for _ in $(seq 1 30); do

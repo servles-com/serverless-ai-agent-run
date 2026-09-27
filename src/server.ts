@@ -71,7 +71,7 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
 
   if (req.method === 'GET' && url.pathname === '/healthz') {
     const docker = await dockerHealth();
-    return send(res, docker.ok ? 200 : 503, { ok: docker.ok, docker, runtime: config.roomRuntime || 'runc', image: config.roomImage, ...stats() });
+    return send(res, docker.ok ? 200 : 503, { ok: docker.ok, docker, runtime: config.roomRuntime || 'runc', image: config.roomImage, disk_quota_mb: config.defaults.diskMb, ...stats() });
   }
   if (!authorized(req)) return send(res, 401, { error: 'unauthorized' });
 

@@ -36,6 +36,23 @@ test('expect: contract met -> SUCCEEDED', async () => {
   assert.equal(run.state, 'SUCCEEDED', explain(run));
 });
 
+test('disk quota: 2 GB into /workspace stops at the quota -> DISK_QUOTA_EXCEEDED, artifacts kept', async t => {
+  const h = await api('GET', '/healthz');
+  if (!h.body.disk_quota_mb) return t.skip('disk quota not enabled on this server (SAR_DEFAULT_DISK_MB=0)');
+  const started = Date.now();
+  const run = await runAndWait({ agent: 'shell', limits: { disk_mb: 128, timeout_s: 120 },
+    task: 'echo kept > /artifacts/kept.txt; dd if=/dev/zero of=/workspace/big bs=1M count=2048' });
+  assert.equal(run.state, 'FAILED', explain(run));
+  assert.equal(run.diagnosis.category, 'DISK_QUOTA_EXCEEDED', explain(run));
+  assert.ok(Date.now() - started < 90_000, 'stopped by the quota, not by a timeout');
+  assert.deepEqual(run.result.artifacts, ['kept.txt']);
+  const art = await api('GET', `/runs/${run.id}/artifacts/kept.txt`);
+  assert.equal(String(art.body).trim(), 'kept', 'artifacts survive the volume release');
+  // Paired: a normal run under the same quota succeeds.
+  const ok = await runAndWait({ agent: 'shell', limits: { disk_mb: 128 }, task: 'head -c 10485760 /dev/zero > /workspace/ten-mb && echo fits' });
+  assert.equal(ok.state, 'SUCCEEDED', explain(ok));
+});
+
 test('crash: non-zero exit -> AGENT_CRASHED with stderr evidence', async () => {
   const run = await runAndWait({ agent: 'shell', task: 'echo "boom: something broke" >&2; exit 3' });
   assert.equal(run.state, 'FAILED', explain(run));

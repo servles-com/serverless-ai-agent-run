@@ -92,3 +92,11 @@ test('result contract categories (details in expect.test.ts)', async () => {
   assert.equal(checkDeliverable(undefined, d, [])?.diagnosis?.category, 'NO_DELIVERABLE');
   assert.equal(checkDeliverable({ artifacts: ['x'] }, d, [])?.diagnosis?.category, 'EXPECTATION_NOT_MET');
 });
+test('full disk quota + failing command -> DISK_QUOTA_EXCEEDED; full but fine -> warning', () => {
+  const v = classify({ ...facts({ exitCode: 1, stderrTail: ['dd: error writing: No space left on device'] }), diskFull: true });
+  assert.equal(v.diagnosis?.category, 'DISK_QUOTA_EXCEEDED');
+  assert.equal(v.diagnosis?.retryable, false);
+  const ok = classify({ ...facts(), diskFull: true });
+  assert.equal(ok.state, 'SUCCEEDED');
+  assert.match(ok.warnings.join(), /disk quota is full/);
+});

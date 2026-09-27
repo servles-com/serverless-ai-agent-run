@@ -89,8 +89,8 @@ export function startRoom(spec: RoomSpec): RoomHandle {
     stdio: ['ignore', 'pipe', 'pipe'],
   });
 
-  const stdoutLog = createWriteStream(join(spec.logDir, 'stdout.log'));
-  const stderrLog = createWriteStream(join(spec.logDir, 'stderr.log'));
+  const stdoutLog = cappedLog(join(spec.logDir, 'stdout.log'), config.roomLogMaxBytes);
+  const stderrLog = cappedLog(join(spec.logDir, 'stderr.log'), config.roomLogMaxBytes);
   const stderrTail: string[] = [];
   let lastActivity = Date.now();
   let timedOut = false, idleKilled = false, cancelled = false;
@@ -141,6 +141,26 @@ export function startRoom(spec: RoomSpec): RoomHandle {
   });
 
   return { container: name, done, cancel: () => { cancelled = true; kill(); } };
+}
+
+// A room log file that stops growing at `max` bytes (checklist 1.13): an agent
+// printing forever must not fill the host disk through its own log.
+export function cappedLog(file: string, max: number) {
+  const stream = createWriteStream(file);
+  let written = 0, capped = false;
+  return {
+    write(line: string) {
+      if (capped) return;
+      if (written + Buffer.byteLength(line) > max) {
+        capped = true;
+        stream.write(`[sar] log truncated at ${max} bytes\n`);
+        return;
+      }
+      written += Buffer.byteLength(line);
+      stream.write(line);
+    },
+    end() { stream.end(); },
+  };
 }
 
 async function inspectRoom(name: string): Promise<any | undefined> {

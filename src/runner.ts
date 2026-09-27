@@ -12,6 +12,7 @@ import { bus, emit, getRun, saveRun, runDir, runsDir, TERMINAL, type RunRecord, 
 import { deliver, flush, shouldDeliver, type WebhookTarget } from './webhooks.ts';
 import { hostClone, openPullRequest, repoAllowed, PullRequestError } from './pullrequest.ts';
 import { scrub } from './redact.ts';
+import { createVolume, releaseVolume, validateDiskLimit, volumeFull } from './volume.ts';
 
 const exec = promisify(execFile);
 
@@ -42,6 +43,8 @@ export function validateRequest(body: any): string | undefined {
   }
   if (body.webhook && !/^https?:\/\//.test(body.webhook.url ?? '')) return 'webhook.url must be an http(s) URL';
   for (const s of body.secrets ?? []) if (!(s in config.secrets)) return `unknown secret "${s}" (not in server secrets file)`;
+  const diskErr = validateDiskLimit(body.limits?.disk_mb, config.defaults.diskMb > 0, config.maxDiskMb);
+  if (diskErr) return diskErr;
   return validateExpect(body.expect, !!body.repo?.pull_request);
 }
 
@@ -100,6 +103,17 @@ async function execute(id: string): Promise<void> {
   // --- hydrate
   setState(rec, 'PREPARING');
   rec.started_at = new Date().toISOString();
+  const diskMb = req.limits?.disk_mb ?? config.defaults.diskMb;
+  if (diskMb > 0) {
+    try {
+      await createVolume(dir, diskMb);
+      emit(id, 'run.log', { msg: `workspace volume: ${diskMb} MB` });
+    } catch (e: any) {
+      return finish(rec, { state: 'FAILED', warnings: [], diagnosis: { category: 'ROOM_START_FAILED',
+        summary: 'Could not create the run\'s disk volume (quota)', evidence: [String(e.stderr || e.message).slice(0, 1000)],
+        retryable: true, hints: ['Check the sudoers rule for sar-run-volume and free disk space on the host (vm-bootstrap.sh)'] } });
+    }
+  }
   try {
     await hydrate(id, req);
   } catch (e: any) {
@@ -125,6 +139,15 @@ async function execute(id: string): Promise<void> {
   setState(rec, 'RUNNING', { model: req.agent === 'shell' ? undefined : model, limits });
   console.log(`run ${id} RUNNING agent=${req.agent} ${req.agent === 'shell' ? '' : `model=${model} `}task=${JSON.stringify(req.task.slice(0, 80))}`);
 
+  // Raw output lines become events too; cap them like the log files (checklist 1.13).
+  let outputBytes = 0;
+  const withinOutputCap = (line: string): boolean => {
+    if (outputBytes > config.roomLogMaxBytes) return false;
+    outputBytes += line.length + 1;
+    if (outputBytes <= config.roomLogMaxBytes) return true;
+    emit(id, 'run.log', { msg: `output events truncated at ${config.roomLogMaxBytes} bytes; the run continues` });
+    return false;
+  };
   const room = startRoom({
     runId: id,
     workspaceDir: join(dir, 'workspace'),
@@ -134,13 +157,14 @@ async function execute(id: string): Promise<void> {
     env, limits,
     onStdoutLine: line => {
       const parsed = adapter.parse(line, agentStats);
-      if (parsed) emit(id, `agent.${parsed.type}`, parsed.data);
+      if (parsed && (parsed.type !== 'stdout' || withinOutputCap(line))) emit(id, `agent.${parsed.type}`, parsed.data);
     },
-    onStderrLine: line => { if (line.trim()) emit(id, 'room.stderr', { line: line.slice(0, 2000) }); },
+    onStderrLine: line => { if (line.trim() && withinOutputCap(line)) emit(id, 'room.stderr', { line: line.slice(0, 2000) }); },
   });
   active.set(id, room);
   if (cancelRequested.has(id)) room.cancel();
   const outcome = await room.done;
+  const diskFull = volumeFull(dir);
   // A step still open when the room stopped (timeout/crash/cancel) never got a
   // step_finish: close it at kill time so TIMEOUT evidence still splits model
   // wait from tool execution.
@@ -160,7 +184,7 @@ async function execute(id: string): Promise<void> {
   rec.result = { text: agentStats.finalText, artifacts, steps: agentStats.steps, tool_calls: agentStats.toolCalls,
     tool_errors: agentStats.toolErrors, tokens: agentStats.tokens,
     model_ms: agentStats.timing.modelMs, tool_ms: agentStats.timing.toolMs, open_ms: agentStats.timing.openMs, step_timings: agentStats.timing.stepTimings };
-  const verdict = classify({ agent: req.agent ?? 'opencode', room: outcome, stats: agentStats, artifacts, exportError });
+  const verdict = classify({ agent: req.agent ?? 'opencode', room: outcome, stats: agentStats, artifacts, exportError, diskFull });
 
   // Host-side PR, only for a run that otherwise succeeded. "Nothing changed" is a
   // failure, not a quiet success — the user's worst case is an agent that did nothing.
@@ -195,6 +219,9 @@ async function execute(id: string): Promise<void> {
 }
 
 function finish(rec: RunRecord, v: { state: RunState; diagnosis?: RunRecord['diagnosis']; warnings: string[] }) {
+  // Artifacts go back to the plain run dir before anyone hears the run is done.
+  const volumeError = releaseVolume(runDir(rec.id));
+  if (volumeError) v.warnings.push(`disk volume release failed: ${volumeError}`);
   rec.diagnosis = v.diagnosis;
   rec.warnings = v.warnings.length ? v.warnings : undefined;
   rec.finished_at = new Date().toISOString();
@@ -275,6 +302,7 @@ export function gcOldRuns(): number {
   for (const id of readdirSync(runsDir())) {
     const rec = getRun(id);
     if (rec && TERMINAL.includes(rec.state) && Date.parse(rec.updated_at) < cutoff) {
+      if (releaseVolume(runDir(id))) continue;   // still mounted: never rm -r through a mount
       rmSync(runDir(id), { recursive: true, force: true });
       n++;
     }

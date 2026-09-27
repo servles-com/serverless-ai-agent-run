@@ -32,7 +32,7 @@ export interface RunRequest {
   secrets?: string[];
   webhook?: { url: string; secret?: string; agent_events?: boolean };
   expect?: Expect;               // result contract, see checkDeliverable() in failures.ts
-  limits?: { timeout_s?: number; idle_timeout_s?: number; memory_mb?: number; cpus?: number; pids?: number };
+  limits?: { timeout_s?: number; idle_timeout_s?: number; memory_mb?: number; cpus?: number; pids?: number; disk_mb?: number };
   metadata?: Record<string, unknown>;
 }
 
