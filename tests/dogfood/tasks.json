@@ -1,11 +1,51 @@
 [
-  { "name": "write-file", "task": "Write /artifacts/hello.txt containing exactly: hello from the room" },
-  { "name": "python-script", "task": "Write /artifacts/primes.py that prints all primes below 100, run it, and save its output to /artifacts/primes.txt" },
-  { "name": "fix-bug", "files": { "calc.py": "def add(a, b):\n    return a - b\n\nif __name__ == '__main__':\n    assert add(2, 3) == 5\n    print('ok')\n" },
-    "task": "calc.py has a bug; fix it so `python3 calc.py` prints ok. Copy the fixed file to /artifacts/calc.py" },
-  { "name": "clone-and-read", "repo": { "url": "https://github.com/octocat/Hello-World" },
-    "task": "Summarize what this repository contains in /artifacts/summary.md (2-3 sentences)." },
-  { "name": "json-transform", "files": { "users.json": "[{\"name\":\"a\",\"age\":30},{\"name\":\"b\",\"age\":17},{\"name\":\"c\",\"age\":45}]" },
-    "task": "Read users.json and write /artifacts/adults.json containing only users with age >= 18, same format." },
-  { "name": "long-shell", "task": "Run `ls -la /workspace /artifacts`, `uname -a` and `df -h /workspace`, and write a short environment report to /artifacts/env.md" }
+  {
+    "name": "write-file",
+    "task": "Write /artifacts/hello.txt containing exactly: hello from the room"
+  },
+  {
+    "name": "python-script",
+    "task": "Write /artifacts/primes.py that prints all primes below 100, run it, and save its output to /artifacts/primes.txt"
+  },
+  {
+    "name": "fix-bug",
+    "files": {
+      "calc.py": "def add(a, b):\n    return a - b\n\nif __name__ == '__main__':\n    assert add(2, 3) == 5\n    print('ok')\n"
+    },
+    "task": "calc.py has a bug; fix it so `python3 calc.py` prints ok. Copy the fixed file to /artifacts/calc.py"
+  },
+  {
+    "name": "clone-and-read",
+    "repo": {
+      "url": "https://github.com/octocat/Hello-World"
+    },
+    "task": "Summarize what this repository contains in /artifacts/summary.md (2-3 sentences)."
+  },
+  {
+    "name": "json-transform",
+    "files": {
+      "users.json": "[{\"name\":\"a\",\"age\":30},{\"name\":\"b\",\"age\":17},{\"name\":\"c\",\"age\":45}]"
+    },
+    "task": "Read users.json and write /artifacts/adults.json containing only users with age >= 18, same format."
+  },
+  {
+    "name": "long-shell",
+    "task": "Run `ls -la /workspace /artifacts`, `uname -a` and `df -h /workspace`, and write a short environment report to /artifacts/env.md"
+  },
+  {
+    "name": "interactive-trap",
+    "task": "Initialise a new Node.js project in /workspace/app with npm and add a start script that prints hi. Put package.json into /artifacts."
+  },
+  {
+    "name": "big-output",
+    "task": "Print the numbers from 1 to 200000 in the shell, count how many of them contain the digit 7, and write only that count to /artifacts/count.txt"
+  },
+  {
+    "name": "vague",
+    "task": "Make it better."
+  },
+  {
+    "name": "network-fetch",
+    "task": "Download https://api.github.com/repos/torvalds/linux and write the repository's stargazers_count to /artifacts/stars.txt"
+  }
 ]

@@ -5,6 +5,8 @@
 //
 //   node scripts/dogfood-free-models.ts            (uses SAR_URL, SAR_API_TOKEN)
 //   SAR_DOGFOOD_MODELS=a,b SAR_DOGFOOD_TASKS=write-file,fix-bug node scripts/...
+//   SAR_DOGFOOD_SAMPLE=2 SAR_DOGFOOD_TIMEOUT_S=240   2 random (model, task) pairs — for
+//                                                    frequent ticks (no .md report, history only)
 //
 // Output: $SAR_DATA_DIR/reports/dogfood-<ts>.md + history.jsonl
 import { readFileSync, mkdirSync, writeFileSync, appendFileSync } from 'node:fs';
@@ -21,14 +23,19 @@ const tasks = JSON.parse(readFileSync(new URL('../tests/dogfood/tasks.json', imp
 const outDir = join(resolve(process.env.SAR_DATA_DIR ?? 'runtime-data'), 'reports');
 mkdirSync(outDir, { recursive: true });
 
+const sample = Number(process.env.SAR_DOGFOOD_SAMPLE ?? 0);
+const timeoutS = Number(process.env.SAR_DOGFOOD_TIMEOUT_S ?? 600);
+let pairs: [string, any][] = models.flatMap(m => tasks.map((t: any) => [m, t] as [string, any]));
+if (sample > 0) pairs = pairs.sort(() => Math.random() - 0.5).slice(0, sample);
+
 const rows: any[] = [];
-for (const model of models) {
-  for (const t of tasks) {
+for (const [model, t] of pairs) {
+  {
     const started = Date.now();
     let run: any;
     try {
       run = await runAndWait({ agent: 'opencode', model, task: t.task, files: t.files, repo: t.repo,
-        limits: { timeout_s: 600, idle_timeout_s: 240 }, metadata: { dogfood: t.name } }, 700);
+        limits: { timeout_s: timeoutS, idle_timeout_s: Math.min(240, timeoutS) }, metadata: { dogfood: t.name } }, timeoutS + 100);
     } catch (e: any) {
       run = { id: '-', state: 'HARNESS_ERROR', diagnosis: { category: 'HARNESS_ERROR', summary: e.message } };
     }
@@ -46,6 +53,8 @@ for (const model of models) {
     console.log(`${row.state.padEnd(10)} ${category.padEnd(22)} ${String(row.seconds).padStart(4)}s  ${model}  ${t.name}  ${run.id}`);
   }
 }
+
+if (sample > 0) process.exit(0);
 
 const byCat = rows.reduce<Record<string, number>>((a, r) => (a[r.category] = (a[r.category] ?? 0) + 1, a), {});
 const md = [
