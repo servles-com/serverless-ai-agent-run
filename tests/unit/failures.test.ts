@@ -92,6 +92,23 @@ test('result contract categories (details in expect.test.ts)', async () => {
   assert.equal(checkDeliverable(undefined, d, [])?.diagnosis?.category, 'NO_DELIVERABLE');
   assert.equal(checkDeliverable({ artifacts: ['x'] }, d, [])?.diagnosis?.category, 'EXPECTATION_NOT_MET');
 });
+test('credential missing / revoked reported by the gateway fail the run with that cause', () => {
+  const miss = { ...facts({ exitCode: 1 }), credentialErrors: [{ code: 'CREDENTIAL_MISSING' as const, ref: 'cred:x' }] };
+  assert.equal(cat(miss), 'CREDENTIAL_MISSING');
+  const both = { ...facts({ exitCode: 1 }), credentialErrors: [
+    { code: 'CREDENTIAL_MISSING' as const, ref: 'cred:x' }, { code: 'CREDENTIAL_REVOKED' as const, ref: 'cred:y' }] };
+  assert.equal(cat(both), 'CREDENTIAL_REVOKED');
+  assert.equal(classify(both).diagnosis?.retryable, false);
+  // The agent recovered and finished cleanly: the credential error is not the verdict.
+  assert.equal(cat({ ...facts(), credentialErrors: miss.credentialErrors }), 'SUCCEEDED');
+});
+test('credentialVerdict: failure at PREPARING, before any room starts', async () => {
+  const { credentialVerdict } = await import('../../src/failures.ts');
+  const v = credentialVerdict([{ code: 'CREDENTIAL_MISSING', ref: 'cred:bob/api' }]);
+  assert.equal(v.state, 'FAILED');
+  assert.equal(v.diagnosis?.category, 'CREDENTIAL_MISSING');
+  assert.match(v.diagnosis!.summary, /cred:bob\/api/);
+});
 
 // SB3: fail-fast on provider errors.
 test('fail-fast trips on the Nth provider error in a row, once', async () => {

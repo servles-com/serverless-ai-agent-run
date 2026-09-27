@@ -104,7 +104,8 @@ OOM, таймауты, счётчики шагов/tool calls, хвост stderr
 | `RUNTIME_BUG` | исключение в нашем коде | среда |
 | `EXPECTATION_NOT_MET` | ран «успешен», но не сдал то, что обещано в `expect` (нет файла, пустой, битый JSON, нет PR, текст не тот) | агент/модель |
 | `NO_DELIVERABLE` | без `expect`: ни финального текста, ни непустого артефакта, ни PR | агент/модель |
-| `SILENT_FAILURE` (только dogfood) | «SUCCEEDED», но ни одного артефакта | самое опасное |
+| `SILENT_FAILURE` (только dogfood) | «SUCCEEDED», но ни текста, ни артефакта, ни PR — значит, проверка `NO_DELIVERABLE` в рантайме что-то пропустила | самое опасное |
+| `HARNESS_ERROR` (только dogfood) | сам харнесс потерял ран: API недоступен дольше 90 с (обычно рестарт `sar`); summary с причиной (`ECONNREFUSED`…), `run_id` сохраняется | харнесс/среда |
 
 Пример, как это уже сработало: в первом dogfood 3 рана упали как `TIMEOUT`. В
 `stderr.log` было видно, что OpenRouter каждые ~2 минуты отдавал `504 stream error`,
@@ -329,6 +330,7 @@ src/failures.ts      классификатор падений
 src/webhooks.ts      подписанные вебхуки по порядку, с ретраями
 src/adapters/        opencode (поток JSON-событий), shell (для тестов)
 src/store.ts         раны на диске
+src/creds/           хендлы кредов, файловый бэкенд, брокер с аудитом (ещё не подключено к рану)
 cli/sar.ts           CLI `sar`: run / status / logs / artifacts (клиент API)
 room-image/          образ комнаты (node + opencode + git + python)
 scripts/             bootstrap, сетевая политика, selftest, dogfood, burst, status, machine (SSH), gcp-lab-vm
