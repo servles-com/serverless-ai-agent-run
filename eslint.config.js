@@ -13,6 +13,7 @@ const anyBaseline = [
   'src/runner.ts',
   'src/server.ts',
   'src/webhooks.ts',
+  'tests/e2e/redaction.test.ts',
   'tests/lib/client.ts',
 ];
 

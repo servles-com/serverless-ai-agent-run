@@ -4,7 +4,7 @@ import { setSecrets, redact, scrub, PLACEHOLDER } from '../../src/redact.ts';
 
 test('replaces a known secret value anywhere in a string', () => {
   setSecrets(['sk-live-abcdef123456']);
-  assert.equal(redact('token=sk-live-abcdef123456 end'), `token=${PLACEHOLDER} end`);
+  assert.equal(redact('token=sk-live-abcdef123456 end'), `token=${PLACEHOLDER} end`); // gitleaks:allow (fake fixture)
   assert.equal(redact('sk-live-abcdef123456'), PLACEHOLDER);
   assert.equal(redact('nothing secret here'), 'nothing secret here');
 });
