@@ -61,6 +61,8 @@ export const config = {
 
   // How long finished run dirs are kept for debugging.
   retentionHours: num('SAR_RETENTION_HOURS', 72),
+  // SSE keep-alive comment interval for /runs/:id/stream (src/stream.ts).
+  streamHeartbeatS: num('SAR_STREAM_HEARTBEAT_S', 15),
 };
 
 // Register every known secret value for redaction before it can reach events,
