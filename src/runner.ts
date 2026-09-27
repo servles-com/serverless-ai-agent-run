@@ -1,18 +1,19 @@
 // Run Manager: queue + lifecycle  hydrate -> execute -> export -> sterilize.
-import { mkdirSync, writeFileSync, readdirSync, statSync, existsSync, rmSync, readFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync, readdirSync, existsSync, rmSync, readFileSync, lstatSync, closeSync } from 'node:fs';
 import { join, dirname, resolve, relative, isAbsolute } from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { config, providerEnvValues } from './config.ts';
 import { adapters, emptyStats } from './adapters/index.ts';
 import { closeOpenStep } from './step-timing.ts';
-import { classify, checkDeliverable, validateExpect } from './failures.ts';
+import { classify, checkDeliverable, validateExpect, newFailFast, observeFailFast } from './failures.ts';
 import { startRoom, destroyRoom, listRoomContainers, containerName, type RoomHandle } from './rooms.ts';
 import { bus, emit, getRun, saveRun, runDir, runsDir, TERMINAL, type RunRecord, type RunRequest, type RunState } from './store.ts';
 import { deliver, flush, shouldDeliver, type WebhookTarget } from './webhooks.ts';
 import { hostClone, openPullRequest, repoAllowed, PullRequestError } from './pullrequest.ts';
 import { scrub } from './redact.ts';
 import { createVolume, releaseVolume, validateDiskLimit, volumeFull } from './volume.ts';
+import { listFiles, openInside, symlinkOnPath } from './safe-files.ts';
 
 const exec = promisify(execFile);
 
@@ -148,6 +149,11 @@ async function execute(id: string): Promise<void> {
     emit(id, 'run.log', { msg: `output events truncated at ${config.roomLogMaxBytes} bytes; the run continues` });
     return false;
   };
+  const failFast = newFailFast(config.failFastProviderErrors);
+  const stopEarly = () => {
+    emit(id, 'run.log', { msg: `fail-fast: ${failFast.errors} provider errors in a row, stopping the room` });
+    void exec(config.docker, ['kill', containerName(id)]).catch(() => {});
+  };
   const room = startRoom({
     runId: id,
     workspaceDir: join(dir, 'workspace'),
@@ -158,8 +164,13 @@ async function execute(id: string): Promise<void> {
     onStdoutLine: line => {
       const parsed = adapter.parse(line, agentStats);
       if (parsed && (parsed.type !== 'stdout' || withinOutputCap(line))) emit(id, `agent.${parsed.type}`, parsed.data);
+      // Provider errors are counted from stderr only (opencode logs each one there once).
+      if (parsed?.type === 'tool' || parsed?.type === 'text' || parsed?.type === 'step_finish') observeFailFast(failFast, { progress: true });
     },
-    onStderrLine: line => { if (line.trim() && withinOutputCap(line)) emit(id, 'room.stderr', { line: line.slice(0, 2000) }); },
+    onStderrLine: line => {
+      if (line.trim() && withinOutputCap(line)) emit(id, 'room.stderr', { line: line.slice(0, 2000) });
+      if (observeFailFast(failFast, { stderr: line })) stopEarly();
+    },
   });
   active.set(id, room);
   if (cancelRequested.has(id)) room.cancel();
@@ -184,7 +195,7 @@ async function execute(id: string): Promise<void> {
   rec.result = { text: agentStats.finalText, artifacts, steps: agentStats.steps, tool_calls: agentStats.toolCalls,
     tool_errors: agentStats.toolErrors, tokens: agentStats.tokens,
     model_ms: agentStats.timing.modelMs, tool_ms: agentStats.timing.toolMs, open_ms: agentStats.timing.openMs, step_timings: agentStats.timing.stepTimings };
-  const verdict = classify({ agent: req.agent ?? 'opencode', room: outcome, stats: agentStats, artifacts, exportError, diskFull });
+  const verdict = classify({ agent: req.agent ?? 'opencode', room: outcome, stats: agentStats, artifacts, exportError, diskFull, failFast });
 
   // Host-side PR, only for a run that otherwise succeeded. "Nothing changed" is a
   // failure, not a quiet success — the user's worst case is an agent that did nothing.
@@ -210,8 +221,12 @@ async function execute(id: string): Promise<void> {
     const artDir = join(dir, 'artifacts');
     const failed = checkDeliverable(req.expect, {
       agent: req.agent ?? 'opencode', text: agentStats.finalText, pullRequest: !!rec.result.pull_request,
-      artifacts: artifacts.map(p => ({ path: p, size: statSync(join(artDir, p)).size })),
-      parsesAsJson: p => { try { JSON.parse(readFileSync(join(artDir, p), 'utf8')); return true; } catch { return false; } },
+      artifacts: artifacts.map(p => ({ path: p, size: lstatSync(join(artDir, p)).size })),
+      parsesAsJson: p => {
+        const fd = openInside(artDir, p);
+        if (fd === undefined) return false;
+        try { JSON.parse(readFileSync(fd, 'utf8')); return true; } catch { return false; } finally { closeSync(fd); }
+      },
     }, verdict.warnings);
     if (failed) Object.assign(verdict, failed);
   }
@@ -253,6 +268,8 @@ async function hydrate(id: string, req: RunRequest) {
     }
   }
   for (const [p, content] of Object.entries(req.files ?? {})) {
+    const link = symlinkOnPath(ws, p);
+    if (link) throw new Error(`input file ${p}: ${link} in the workspace is a symlink; refusing to write through it`);
     const full = join(ws, p);
     mkdirSync(dirname(full), { recursive: true });
     writeFileSync(full, content);
@@ -266,17 +283,7 @@ function safeRelPath(p: string): boolean {
   return !!r && !r.startsWith('..');
 }
 
-export function listFiles(root: string, base = root): string[] {
-  if (!existsSync(root)) return [];
-  const out: string[] = [];
-  for (const name of readdirSync(root)) {
-    const full = join(root, name);
-    const st = statSync(full);
-    if (st.isDirectory()) out.push(...listFiles(full, base));
-    else if (st.isFile()) out.push(relative(base, full));
-  }
-  return out.sort();
-}
+export { listFiles };
 
 // Crash recovery: runs left non-terminal by a previous process are failed
 // with an explicit category, and their orphaned rooms are destroyed.

@@ -100,3 +100,38 @@ test('full disk quota + failing command -> DISK_QUOTA_EXCEEDED; full but fine ->
   assert.equal(ok.state, 'SUCCEEDED');
   assert.match(ok.warnings.join(), /disk quota is full/);
 });
+
+// SB3: fail-fast on provider errors.
+test('fail-fast trips on the Nth provider error in a row, once', async () => {
+  const { newFailFast, observeFailFast } = await import('../../src/failures.ts');
+  const s = newFailFast(3);
+  const line = 'level=ERROR message="stream error" providerID=openrouter error.error.code=504';
+  assert.equal(observeFailFast(s, { stderr: line }), false);
+  assert.equal(observeFailFast(s, { stderr: 'INFO unrelated log line' }), false);
+  assert.equal(observeFailFast(s, { stderr: line }), false);
+  assert.equal(observeFailFast(s, { stderr: line }), true);
+  assert.equal(observeFailFast(s, { stderr: line }), false, 'trips only once');
+  assert.equal(s.errors, 3);
+  assert.equal(s.samples.length, 3);
+});
+test('fail-fast: agent progress resets the count; 0 disables', async () => {
+  const { newFailFast, observeFailFast } = await import('../../src/failures.ts');
+  const s = newFailFast(2);
+  observeFailFast(s, { stderr: '429 too many requests' });
+  observeFailFast(s, { progress: true });
+  assert.equal(observeFailFast(s, { stderr: '429 too many requests' }), false);
+  assert.equal(observeFailFast(s, { stderr: '429 too many requests' }), true);
+  assert.equal(s.category, 'MODEL_RATE_LIMITED');
+  const off = newFailFast(0);
+  for (let i = 0; i < 10; i++) assert.equal(observeFailFast(off, { stderr: '504 upstream' }), false);
+});
+test('fail-fast verdict: FAILED with the provider category, before timeout/crash checks', async () => {
+  const { newFailFast, observeFailFast } = await import('../../src/failures.ts');
+  const ff = newFailFast(1);
+  observeFailFast(ff, { stderr: 'error.error.code=504 stream error' });
+  const v = classify({ ...facts({ exitCode: 137 }, { toolCalls: 0, finalText: undefined }), failFast: ff });
+  assert.equal(v.state, 'FAILED');
+  assert.equal(v.diagnosis?.category, 'MODEL_PROVIDER_ERROR');
+  assert.match(v.diagnosis!.summary, /Stopped early/);
+  assert.equal(v.diagnosis?.retryable, true);
+});

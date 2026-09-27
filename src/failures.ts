@@ -15,6 +15,7 @@ export interface Facts {
   artifacts: string[];
   exportError?: string;
   diskFull?: boolean;              // the run's disk volume was (nearly) full when the room stopped
+  failFast?: FailFastState;    // set when the runner stopped the room early (SB3)
 }
 
 export interface Verdict { state: RunState; diagnosis?: Diagnosis; warnings: string[] }
@@ -26,6 +27,41 @@ const MODEL_ERROR_PATTERNS: [RegExp, string, boolean][] = [
   [/context.?length|maximum context|too many tokens|context window/i, 'MODEL_CONTEXT_OVERFLOW', false],
   [/code[=:" ]+5\d\d\b|status(Code)?[=:" ]+5\d\d\b|\b50[234]\b|overloaded|upstream|provider returned error|stream error|timeout.*(provider|model)|ECONNRESET|ETIMEDOUT|fetch failed/i, 'MODEL_PROVIDER_ERROR', true],
 ];
+
+export function providerErrorCategory(line: string): string | undefined {
+  return MODEL_ERROR_PATTERNS.find(([re]) => re.test(line))?.[1];
+}
+
+// --- Fail-fast on provider errors (SB3). Free models often fail for minutes while
+// the agent CLI keeps retrying; without this the run burns its whole timeout.
+// N provider-error lines in a row, with no agent progress in between, trip it and
+// the runner stops the room. Progress (a tool call or model output) resets the count.
+
+export interface FailFastState {
+  threshold: number;          // 0 = disabled
+  errors: number;             // consecutive provider errors since the last progress
+  category: string;           // category of the most recent error
+  samples: string[];
+  tripped: boolean;
+}
+
+export function newFailFast(threshold: number): FailFastState {
+  return { threshold, errors: 0, category: 'MODEL_PROVIDER_ERROR', samples: [], tripped: false };
+}
+
+// Returns true exactly once: on the observation that trips the threshold.
+export function observeFailFast(s: FailFastState, ev: { stderr?: string; progress?: boolean }): boolean {
+  if (s.tripped || s.threshold <= 0) return false;
+  if (ev.progress) { s.errors = 0; s.samples = []; return false; }
+  const category = ev.stderr ? providerErrorCategory(ev.stderr) : undefined;
+  if (!category) return false;
+  s.errors++;
+  s.category = category;
+  s.samples = [...s.samples, ev.stderr!.slice(0, 300)].slice(-3);
+  if (s.errors < s.threshold) return false;
+  s.tripped = true;
+  return true;
+}
 
 function providerHits(text: string): [string, string][] {
   const out: [string, string][] = [];
@@ -54,6 +90,13 @@ export function classify(f: Facts): Verdict {
       ['Check `GET /healthz`: image built? runtime (runsc) registered in docker?', 'See room/docker-args.json for the exact docker command']);
   }
   if (room.cancelled) return fail('CANCELLED', 'CANCELLED', 'Run was cancelled by the caller', [], true, []);
+  if (f.failFast?.tripped) {
+    const ff = f.failFast;
+    return fail('FAILED', ff.category, `Stopped early: ${ff.errors} provider errors in a row without agent progress`,
+      [`provider_errors=${ff.errors}`, `duration_ms=${room.durationMs}`, `tool_calls=${stats.toolCalls}`, ...ff.samples], true,
+      ['The model provider is failing right now — retry later or switch model',
+       'Threshold: SAR_FAILFAST_PROVIDER_ERRORS (0 disables)']);
+  }
   if (room.oomKilled) {
     return fail('FAILED', 'OOM_KILLED', 'Room exceeded its memory limit and was killed by the kernel',
       [`exit_code=${room.exitCode}`, ...tail(4)], false,
@@ -75,7 +118,7 @@ export function classify(f: Facts): Verdict {
       return fail(room.timedOut ? 'TIMED_OUT' : 'FAILED', category,
         `Model provider kept failing (${hits.length} errors); agent retried until ${room.timedOut ? 'timeout' : 'idle stall'} without a single tool call`,
         [`provider_errors=${hits.length}`, sample.slice(0, 500)], true,
-        ['Switch model — this one is unavailable/overloaded right now', 'Failing fast on repeated provider errors is a runtime TODO']);
+        ['Switch model — this one is unavailable/overloaded right now', 'Errors were spread out with retries in between, so fail-fast (SAR_FAILFAST_PROVIDER_ERRORS) did not trip']);
     }
   }
   if (room.timedOut) {

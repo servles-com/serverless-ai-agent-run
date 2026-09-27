@@ -49,12 +49,16 @@ export const config = {
     diskMb: num('SAR_DEFAULT_DISK_MB', 0),
     cpus: num('SAR_DEFAULT_CPUS', 1),
     pids: num('SAR_DEFAULT_PIDS', 512),
-    model: process.env.SAR_DEFAULT_MODEL ?? 'openrouter/nvidia/nemotron-3-super-120b-a12b:free',
+    // The owner's LLM ladder (Go → Zen/OpenRouter free → cheap paid); see adapters/opencode.ts.
+    model: process.env.SAR_DEFAULT_MODEL ?? 'ladder/free',
   },
 
   // Env vars always passed to opencode rooms (model provider keys).
-  providerEnv: ['OPENROUTER_API_KEY'],
+  providerEnv: ['LLM_LADDER_TOKEN', 'OPENROUTER_API_KEY'],
   secrets: loadSecrets(process.env.SAR_SECRETS_FILE),
+
+  // Fail fast after this many provider errors in a row without agent progress (0 = off).
+  failFastProviderErrors: num('SAR_FAILFAST_PROVIDER_ERRORS', 3),
 
   // Host-side PRs: token used only by the host (never passed to rooms) and the
   // repos it may push to ("owner/repo", comma-separated).
