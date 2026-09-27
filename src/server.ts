@@ -4,11 +4,15 @@
 //   GET  /runs                       recent runs
 //   GET  /runs/:id                   run record (state, result, diagnosis)
 //   GET  /runs/:id/events            JSON array; ?after=<seq>; SSE with Accept: text/event-stream or ?follow=1
+//   GET  /runs/:id/stream            SSE with ?types= filter, heartbeat, Last-Event-ID (src/stream.ts)
+//   GET  /runs/:id/transcript        markdown transcript of the session
 //   GET  /runs/:id/debug             everything needed to understand a failure in one response
 //   GET  /runs/:id/artifacts         list
 //   GET  /runs/:id/artifacts/<path>  download
 //   POST /runs/:id/cancel
 //   GET  /healthz                    docker/runtime/image checks (no auth)
+//
+// Auth: the master API token, or a run's stream_token (read-only, that run only).
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { createReadStream, existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -18,6 +22,7 @@ import { bus, createRun, getRun, listRuns, readEvents, runDir, TERMINAL, type Ru
 import { cancel, enqueue, gcOldRuns, reconcileOnStartup, stats, validateRequest, listFiles } from './runner.ts';
 import { dockerHealth } from './rooms.ts';
 import { openInside } from './safe-files.ts';
+import { isStreamToken, issueStreamToken, presentedToken, renderTranscript, streamRun, streamTokenAllows } from './stream.ts';
 
 function send(res: ServerResponse, code: number, body: unknown) {
   res.writeHead(code, { 'content-type': 'application/json' });
@@ -95,10 +100,14 @@ addRoute('POST', '/runs', async ({ req, res }) => {
   body.agent ??= 'opencode';
   const err = validateRequest(body);
   if (err) return send(res, 400, { error: err });
+  const ae = body.webhook?.agent_events;
+  if (ae !== undefined && typeof ae !== 'boolean' && ae !== 'coalesced') return send(res, 400, { error: 'webhook.agent_events must be true, false or "coalesced"' });
   const rec = createRun(body);
+  const streamToken = issueStreamToken(rec);
   enqueue(rec, body);
-  return send(res, 202, { id: rec.id, state: rec.state, links: {
-    self: `/runs/${rec.id}`, events: `/runs/${rec.id}/events`, debug: `/runs/${rec.id}/debug`, artifacts: `/runs/${rec.id}/artifacts` } });
+  return send(res, 202, { id: rec.id, state: rec.state, stream_token: streamToken, links: {
+    self: `/runs/${rec.id}`, events: `/runs/${rec.id}/events`, stream: `/runs/${rec.id}/stream`, transcript: `/runs/${rec.id}/transcript`,
+    debug: `/runs/${rec.id}/debug`, artifacts: `/runs/${rec.id}/artifacts` } });
 });
 
 addRoute('GET', '/runs/:id', ({ res, rec }) => send(res, 200, rec));
@@ -111,6 +120,14 @@ addRoute('GET', '/runs/:id/events/*', ({ req, res, url, id }) => {
     return streamEvents(req, res, id, after);
   }
   return send(res, 200, readEvents(id, after));
+});
+
+addRoute('GET', '/runs/:id/stream/*', ({ req, res, url, rec }) => streamRun(req, res, rec, url));
+
+addRoute('GET', '/runs/:id/transcript/*', ({ res, url, id, rec }) => {
+  const text = url.searchParams.get('format') === 'text';
+  res.writeHead(200, { 'content-type': text ? 'text/plain; charset=utf-8' : 'text/markdown; charset=utf-8' });
+  res.end(renderTranscript(rec, readEvents(id), text ? 'text' : 'markdown'));
 });
 
 addRoute('GET', '/runs/:id/debug/*', ({ res, id, rec, dir }) => {
@@ -146,7 +163,13 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
     const docker = await dockerHealth();
     return send(res, docker.ok ? 200 : 503, { ok: docker.ok, docker, runtime: config.roomRuntime || 'runc', image: config.roomImage, ...stats() });
   }
-  if (!authorized(req)) return send(res, 401, { error: 'unauthorized' });
+  const token = presentedToken(req, url);
+  if (isStreamToken(token)) {
+    // Checked even in SAR_INSECURE_DEV: a stream token never widens to the master scope.
+    if (!streamTokenAllows(token, req.method ?? '', parts, parts[1] ? getRun(parts[1]) : undefined)) {
+      return send(res, 403, { error: 'stream token does not grant this request' });
+    }
+  } else if (!authorized(req)) return send(res, 401, { error: 'unauthorized' });
 
   const id = parts[0] === 'runs' ? parts[1] : undefined;
   const rec = id === undefined ? undefined : getRun(id);
