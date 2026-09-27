@@ -17,6 +17,7 @@
 > гоняет задачи на бесплатных моделях. Один оператор (один API-токен).
 > Трекинг: [docs/requirements-log.md](docs/requirements-log.md) ·
 > безопасность: [docs/security-checklist.md](docs/security-checklist.md) ·
+> креды: [docs/credentials-and-secret-storage-design.md](docs/credentials-and-secret-storage-design.md) ·
 > CI/CD и логи: [docs/ci-cd-and-logging-development-plan.md](docs/ci-cd-and-logging-development-plan.md) ·
 > планы: [docs/ROADMAP.md](docs/ROADMAP.md) ·
 > потребности пользователя: [docs/user-needs-discovery.md](docs/user-needs-discovery.md)
@@ -299,5 +300,5 @@ docs/                архитектура, безопасность, roadmap, 
 - Держать актуальными `docs/requirements-log.md` и `docs/security-checklist.md`.
 - Флоу: feature-ветка → PR → CI зелёный → merge → `machine.sh bootstrap` → selftest.
 - Никаких облачных сервисов (GCS, Secret Manager, managed DB/queues): только машина, файлы, sqlite, systemd, docker+gVisor.
-- План CI/CD и логов: `docs/ci-cd-and-logging-development-plan.md`. Приватный репо на GitHub Free — branch protection недоступна, последнюю линию держит машина (CD сверяет статус коммита).
+- План CI/CD и логов: `docs/ci-cd-and-logging-development-plan.md`. Репо публичный; `main` защищён: только PR + зелёный `check`, в том числе для админов. Секреты, токены, IP машины и личные данные в репо и issues не писать.
   В `main` напрямую не пушить.
