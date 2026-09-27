@@ -43,11 +43,12 @@ test('isolation probes from tenant A cannot see tenant B', async () => {
 // Checklist 2.5: two rooms at the same time (SAR_MAX_ROOMS >= 2). The victim serves
 // a marker over HTTP and proves it is reachable from inside itself (paired check);
 // the attacker, running concurrently, must reach neither the port nor the file.
+// Patterns are written as regex classes so they never match the probe's own cmdline.
 const NEIGHBOUR_PROBES = String.raw`
 check() { if eval "$2" >/dev/null 2>&1; then echo "CHECK $1 PASS"; else echo "CHECK $1 FAIL"; fi; }
 check neighbour_http_blocked   '! curl -s -m 4 http://$VICTIM_IP:8080/marker.txt'
 check neighbour_marker_hidden  '! grep -rsl "$MARKER" /workspace /artifacts /tmp /home /var /opt /proc/[0-9]*/cwd/'
-check neighbour_not_in_proc    '! grep -sl "http.server" /proc/[0-9]*/cmdline'
+check neighbour_not_in_proc    '! grep -sl "http[.]serve[r]" /proc/[0-9]*/cmdline'
 check internet_still_works     'curl -s -m 10 -o /dev/null https://api.github.com'
 `;
 
