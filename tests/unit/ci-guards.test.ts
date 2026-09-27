@@ -141,3 +141,11 @@ test('rule: package-lock.json does not count towards PR size', () => {
   assert.equal(changedLines([lock, code]), 10);
   assert.equal(sizeViolation([lock, code]), null);
 });
+
+test('rule: host gateway and credential broker are sensitive', () => {
+  assert.equal(isSensitivePath('src/gateway.ts'), true);
+  assert.equal(isSensitivePath('src/creds/broker.ts'), true);
+  assert.equal(isSensitivePath('src/creds/handle.ts'), true);
+  assert.equal(isSensitivePath('src/gateway-client.ts'), false);
+  assert.equal(isSensitivePath('src/credsx.ts'), false);
+});

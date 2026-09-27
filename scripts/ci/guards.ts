@@ -32,6 +32,8 @@ export const SENSITIVE_SUFFIXES = [
   'room-image/Dockerfile',
   'scripts/vm-bootstrap.sh',
   'tests/e2e/isolation.test.ts',
+  // Host gateway: the one door from rooms to the host network, with credentials.
+  'src/gateway.ts',
 ];
 
 export function isTestPath(path: string): boolean {
@@ -45,6 +47,8 @@ export function isSrcPath(path: string): boolean {
 // Directories whose every file is sensitive: the guard itself and the workflows
 // that run it. Without this a PR could switch the guard off in the same change.
 export const SENSITIVE_PREFIXES = [
+  // Credential resolution: owner-only namespace, audit, file backend.
+  'src/creds/',
   'scripts/ci/',
   '.github/workflows/',
 ];
