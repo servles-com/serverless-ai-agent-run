@@ -13,16 +13,53 @@ export async function api(method: string, path: string, body?: unknown): Promise
   return { status: res.status, body: json };
 }
 
-export async function runAndWait(req: Record<string, unknown>, maxS = 300): Promise<any> {
-  const created = await api('POST', '/runs', req);
-  if (created.status !== 202) throw new Error(`create failed: ${JSON.stringify(created.body)}`);
+// Undici's `fetch failed` hides the real reason in `cause` (ECONNREFUSED while the
+// service restarts, ECONNRESET, ...). Issue #86: two dogfood rows were lost as bare
+// "fetch failed" because a single failed poll aborted the whole wait.
+export function describeError(e: any): string {
+  const c = e?.cause;
+  const why = c ? [c.code, c.message].filter(Boolean).join(' ') : '';
+  return why && !String(e?.message).includes(why) ? `${e?.message} (${why})` : String(e?.message ?? e);
+}
+
+// Network-level failure (no HTTP response). ECONNREFUSED means the request never
+// reached the server, so even a non-idempotent POST is safe to repeat.
+export function isTransientFetchError(e: any, method = 'GET'): boolean {
+  if (!(e instanceof TypeError) || e.message !== 'fetch failed') return false;
+  return method === 'GET' || (e.cause as { code?: string } | undefined)?.code === 'ECONNREFUSED';
+}
+
+// Retries transient network errors until `graceMs` of continuous failure has passed.
+export async function withRetry<T>(fn: () => Promise<T>, method: string, graceMs: number, sleep = (ms: number) => new Promise(r => setTimeout(r, ms))): Promise<T> {
+  const start = Date.now();
+  for (let delay = 500; ; delay = Math.min(delay * 2, 5000)) {
+    try { return await fn(); } catch (e) {
+      if (!isTransientFetchError(e, method) || Date.now() - start >= graceMs) throw e;
+      await sleep(delay);
+    }
+  }
+}
+
+export class RunWaitError extends Error {
+  runId?: string;
+  constructor(message: string, runId?: string) { super(message); this.runId = runId; }
+}
+
+// `graceMs`: how long the API may be unreachable (e.g. `sar` restarting on deploy)
+// before giving up. The run itself survives or ends as ORPHANED_BY_RESTART.
+export async function runAndWait(req: Record<string, unknown>, maxS = 300, graceMs = 90_000): Promise<any> {
+  let created: any;
+  try { created = await withRetry(() => api('POST', '/runs', req), 'POST', graceMs); } catch (e) { throw new RunWaitError(`create: ${describeError(e)}`); }
+  if (created.status !== 202) throw new RunWaitError(`create failed: ${JSON.stringify(created.body)}`);
   const id = created.body.id;
-  for (let i = 0; i < maxS * 2; i++) {
-    const r = await api('GET', `/runs/${id}`);
-    if (['SUCCEEDED', 'FAILED', 'CANCELLED', 'TIMED_OUT'].includes(r.body.state)) return r.body;
+  const deadline = Date.now() + maxS * 1000;
+  while (Date.now() < deadline) {
+    let r: any;
+    try { r = await withRetry(() => api('GET', `/runs/${id}`), 'GET', graceMs); } catch (e) { throw new RunWaitError(`poll ${id}: ${describeError(e)}`, id); }
+    if (['SUCCEEDED', 'FAILED', 'CANCELLED', 'TIMED_OUT'].includes(r.body?.state)) return r.body;
     await new Promise(res => setTimeout(res, 500));
   }
-  throw new Error(`run ${id} did not finish in ${maxS}s`);
+  throw new RunWaitError(`run ${id} did not finish in ${maxS}s`, id);
 }
 
 export function explain(run: any): string {
