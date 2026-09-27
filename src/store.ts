@@ -13,6 +13,7 @@ import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { config } from './config.ts';
+import { scrub } from './redact.ts';
 
 export type RunState =
   | 'QUEUED' | 'PREPARING' | 'RUNNING' | 'EXPORTING'
@@ -92,7 +93,7 @@ export function createRun(req: RunRequest): RunRecord {
 export function saveRun(rec: RunRecord): void {
   rec.updated_at = new Date().toISOString();
   const file = join(runDir(rec.id), 'run.json');
-  writeFileSync(file + '.tmp', JSON.stringify(redactRequest(rec), null, 2));
+  writeFileSync(file + '.tmp', JSON.stringify(scrub(redactRequest(rec)), null, 2));
   renameSync(file + '.tmp', file);
 }
 
@@ -114,7 +115,7 @@ export function emit(runId: string, type: string, data: Record<string, unknown>)
   if (seq === undefined) seq = readEvents(runId).length;
   seq += 1;
   seqs.set(runId, seq);
-  const ev: RunEvent = { seq, ts: new Date().toISOString(), run_id: runId, type, data };
+  const ev: RunEvent = { seq, ts: new Date().toISOString(), run_id: runId, type, data: scrub(data) };
   appendFileSync(join(runDir(runId), 'events.jsonl'), JSON.stringify(ev) + '\n');
   bus.emit(runId, ev);
   bus.emit('*', ev);

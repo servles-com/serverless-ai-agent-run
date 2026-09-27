@@ -9,6 +9,7 @@ import { classify } from './failures.ts';
 import { startRoom, destroyRoom, listRoomContainers, containerName, type RoomHandle } from './rooms.ts';
 import { bus, emit, getRun, saveRun, runDir, runsDir, TERMINAL, type RunRecord, type RunRequest, type RunState } from './store.ts';
 import { deliver, flush, shouldDeliver, type WebhookTarget } from './webhooks.ts';
+import { scrub } from './redact.ts';
 
 const exec = promisify(execFile);
 
@@ -155,7 +156,7 @@ function finish(rec: RunRecord, v: { state: RunState; diagnosis?: RunRecord['dia
   rec.diagnosis = v.diagnosis;
   rec.warnings = v.warnings.length ? v.warnings : undefined;
   rec.finished_at = new Date().toISOString();
-  if (v.diagnosis) writeFileSync(join(runDir(rec.id), 'diagnosis.json'), JSON.stringify(v.diagnosis, null, 2));
+  if (v.diagnosis) writeFileSync(join(runDir(rec.id), 'diagnosis.json'), JSON.stringify(scrub(v.diagnosis), null, 2));
   setState(rec, v.state, { diagnosis: v.diagnosis, warnings: rec.warnings, result: rec.result });
   emit(rec.id, 'run.completed', { state: v.state, category: v.diagnosis?.category ?? 'OK' });
   // One line per finished run in `journalctl -u sar` — the operator's first place to look.

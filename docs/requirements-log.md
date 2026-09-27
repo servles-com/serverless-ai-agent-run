@@ -18,6 +18,7 @@
 - [реализовано] Классификация таймаутов из-за ретраев провайдера (504) как MODEL_PROVIDER_ERROR — первая находка dogfood
 - [реализовано] Dogfood burst-режим (раз в 5 мин, 2 случайных рана) с автоотключением; статус-скрипт — 2026-09-27
 - [реализовано] Журнал сервиса: строка на старт/финиш каждого рана
+- [реализовано] Редакция секретов (G3): значения `secrets.env` и provider env → `***` в events.jsonl, `run.json`, `stdout/stderr.log`, `/debug` и вебхуках; unit + e2e — 2026-09-27
 - [реализовано] Security checklist с проверкой на VM (docs/security-checklist.md)
 - [реализовано] Ограничение хостинга: одна голая машина, никаких облачных сервисов (GCS/Secret Manager/KMS убраны из планов); `scripts/machine.sh` по SSH — 2026-09-27
 - [реализовано] Репо публичный; branch protection main (PR + check, enforce admins); одобрение Actions для форков — 2026-09-27
