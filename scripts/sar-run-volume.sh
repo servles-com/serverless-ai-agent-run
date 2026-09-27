@@ -22,7 +22,7 @@ owner=$(stat -c %u:%g "$real")
 case "$cmd" in
   create)
     size=${3:-}
-    [[ "$size" =~ ^[0-9]+$ ]] && [ "$size" -ge 16 ] && [ "$size" -le 65536 ] || die "size_mb must be 16..65536"
+    if ! [[ "$size" =~ ^[0-9]+$ ]] || [ "$size" -lt 16 ] || [ "$size" -gt 65536 ]; then die "size_mb must be 16..65536"; fi
     mountpoint -q "$vol" && die "already mounted"
     for d in workspace artifacts; do [ -L "$real/$d" ] && die "$d is a symlink"; done
     truncate -s "${size}M" "$img"
