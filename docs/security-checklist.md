@@ -51,6 +51,7 @@
 | 3.7 | ⚠️ Токен dogfood — классический `ghp_` с `repo` + `admin:org` на все репо | ⚠️ | решение пользователя; отозвать при удалении VM |
 | 3.8 | Файлы `/etc/sar/*.env` `640 root:sar` | ✅ | manual |
 | 3.9 | Секрет, напечатанный агентом, редактируется (`***`) в `events.jsonl`, `run.json`, логах и вебхуках | ✅ | test `e2e: secret redaction` + unit `redact.test.ts`: значения из `secrets.env` и provider env заменяются на `***` (src/redact.ts) |
+| 3.9b | Секрет, разрезанный между live-дельтами (`live: true`) или обрезанный хвостом вывода команды, тоже маскируется | ✅ | unit `redact.test.ts` (StreamRedactor на чанках 1..40 символов, redactTail), `opencode-live.test.ts` |
 
 ## 4. API и хост
 

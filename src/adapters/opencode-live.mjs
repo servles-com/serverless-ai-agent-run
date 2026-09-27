@@ -51,7 +51,7 @@ function onEvent(ev) {
     if (st.status === 'running') {
       if (!running.has(part.callID)) { running.set(part.callID, 0); live({ ev: 'tool_start', call: part.callID, tool: part.tool, input: st.input }); }
       const o = String(st.metadata?.output ?? '');
-      if (o.length > running.get(part.callID)) { running.set(part.callID, o.length); live({ ev: 'tool_output', call: part.callID, output: o.slice(-4000) }); }
+      if (o.length > running.get(part.callID)) { running.set(part.callID, o.length); live({ ev: 'tool_output', call: part.callID, output: o.slice(-4000), truncated: o.length > 4000 }); }
     } else if (st.status === 'completed' || st.status === 'error') once(part.callID, { type: 'tool_use' });
   }
 }

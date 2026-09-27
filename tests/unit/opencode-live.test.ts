@@ -90,3 +90,20 @@ test('adapter: live mode swaps the command, default stays plain opencode run', (
   assert.deepEqual(live.slice(0, 3), ['node', '--input-type=module', '-e']);
   assert.ok(live.includes('--auto') && live.includes('m'));
 });
+
+test('adapter: a secret split across two live deltas never reaches an event in clear', async () => {
+  const { setSecrets } = await import('../../src/redact.ts');
+  const secret = 'cf-token-9f8e7d6c5b4a';
+  setSecrets([secret]);
+  try {
+    const stats = emptyStats();
+    const line = (delta: string) => JSON.stringify({ type: 'sar_live', ev: 'text_delta', part: 'p1', kind: 'text', delta });
+    const events = [line(`the key is ${secret.slice(0, 9)}`), line(`${secret.slice(9)} ok, more text follows here`)]
+      .map(l => opencodeAdapter.parse(l, stats)).filter(Boolean);
+    const shown = events.map(e => String(e!.data.delta)).join('');
+    assert.ok(!shown.includes(secret.slice(0, 6)), shown);
+    assert.match(shown, /the key is \*\*\*/);
+    const cut = opencodeAdapter.parse(JSON.stringify({ type: 'sar_live', ev: 'tool_output', call: 'c', output: secret.slice(4) + '\nline two', truncated: true }), stats);
+    assert.equal(cut!.data.output, 'line two');
+  } finally { setSecrets([]); }
+});
