@@ -13,16 +13,27 @@ export async function api(method: string, path: string, body?: unknown): Promise
   return { status: res.status, body: json };
 }
 
-export async function runAndWait(req: Record<string, unknown>, maxS = 300): Promise<any> {
+// Waits for a terminal state. `maxS` counts from when the run leaves QUEUED —
+// time spent waiting for a free room is not the run's fault. A run stuck in the
+// queue longer than `maxQueueS` throws QueueTimeoutError (and is cancelled).
+export class QueueTimeoutError extends Error {}
+export async function runAndWait(req: Record<string, unknown>, maxS = 300, maxQueueS = 1800): Promise<any> {
   const created = await api('POST', '/runs', req);
   if (created.status !== 202) throw new Error(`create failed: ${JSON.stringify(created.body)}`);
   const id = created.body.id;
-  for (let i = 0; i < maxS * 2; i++) {
+  const t0 = Date.now();
+  let startedAt: number | undefined;
+  for (;;) {
     const r = await api('GET', `/runs/${id}`);
     if (['SUCCEEDED', 'FAILED', 'CANCELLED', 'TIMED_OUT'].includes(r.body.state)) return r.body;
-    await new Promise(res => setTimeout(res, 500));
+    if (r.body.state !== 'QUEUED' && startedAt === undefined) startedAt = Date.now();
+    if (startedAt === undefined && Date.now() - t0 > maxQueueS * 1000) {
+      await api('POST', `/runs/${id}/cancel`);
+      throw new QueueTimeoutError(`run ${id} waited in the queue for more than ${maxQueueS}s`);
+    }
+    if (startedAt !== undefined && Date.now() - startedAt > maxS * 1000) throw new Error(`run ${id} did not finish in ${maxS}s after start`);
+    await new Promise(res => setTimeout(res, 1000));
   }
-  throw new Error(`run ${id} did not finish in ${maxS}s`);
 }
 
 export function explain(run: any): string {

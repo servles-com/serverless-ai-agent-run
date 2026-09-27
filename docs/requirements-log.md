@@ -1,3 +1,6 @@
+> **Архив (с 2026-09-28).** Требования и их статус живут в GitHub issues этого репо
+> (open/closed + комментарий с причиной). Сюда строки больше не добавлять.
+
 # Requirements log
 
 - [реализовано] HTTP API: POST /runs → run_id, GET run/events/artifacts, cancel — fire-and-forget как Cloudflare Worker

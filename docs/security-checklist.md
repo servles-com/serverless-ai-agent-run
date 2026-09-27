@@ -60,6 +60,7 @@
 | 4.2 | Bearer-токен, сравнение timing-safe | ✅ | код |
 | 4.3 | Нет `SAR_API_TOKEN` → сервис не стартует (кроме явного dev-режима) | ✅ | код |
 | 4.4 | Path traversal во входных файлах и в скачивании артефактов | ✅ | test (`../escape` → 400), код |
+| 4.4b | Symlink из комнаты (`/artifacts/x -> /etc/sar/secrets.env`) не отдаётся и не листится; входные файлы не пишутся через symlink клонированного репо | ✅ | найдено 2026-09-28 (хост отдавал свой файл); unit `safe-files.test.ts` + e2e в failure modes (`src/safe-files.ts`) |
 | 4.5 | **SSRF через `webhook.url`** — control plane может POST-ить на внутренние адреса | ⚠️ | V0 — один доверенный оператор; при внешних юзерах запретить приватные/metadata адреса |
 | 4.8 | `stream_token` рана читает только свой ран (events/stream/transcript/artifacts), ничего не пишет; хранится sha256; в `SAR_INSECURE_DEV` тоже проверяется | ✅ | test (`tests/e2e/stream.test.ts`: «A не читает B» + парная «A читает A»; unit) |
 | 4.6 | Rate limit / квоты на API | ❌ | нет |
