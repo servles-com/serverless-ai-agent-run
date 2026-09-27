@@ -15,7 +15,7 @@ check no_marker_in_fs    '! grep -rsl "$MARKER" /workspace /artifacts /tmp /home
 check no_other_runs      '! ls / /workspace/.. | grep -q "^run_"'
 check few_processes      '[ "$(ls -d /proc/[0-9]* | wc -l)" -lt 30 ]'
 check no_metadata        '! curl -s -m 4 -H "Metadata-Flavor: Google" http://169.254.169.254/computeMetadata/v1/'
-check no_host_api        '! curl -s -m 4 http://$(ip route 2>/dev/null | awk "/default/{print \$3}" || echo 172.30.0.1):8787/healthz'
+check no_host_api        '! curl -s -m 4 http://172.30.0.1:8787/healthz'
 check no_private_net     '! curl -s -m 4 http://10.128.0.1/'
 check no_provider_key    '[ -z "$OPENROUTER_API_KEY" ]'
 check internet_works     'curl -s -m 10 -o /dev/null https://api.github.com'
