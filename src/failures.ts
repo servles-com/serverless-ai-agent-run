@@ -74,8 +74,11 @@ export function classify(f: Facts): Verdict {
   if (room.timedOut) {
     return fail('TIMED_OUT', 'TIMEOUT', 'Run exceeded limits.timeout_s',
       [`duration_ms=${room.durationMs}`, `steps=${stats.steps}`, `tool_calls=${stats.toolCalls}`,
-       `model_ms=${stats.timing.modelMs}`, `tool_ms=${stats.timing.toolMs}`], true,
-      stats.steps > 30 ? ['Agent made many steps — probably looping; inspect repeated tool calls'] : ['Raise limits.timeout_s or split the task']);
+       `model_ms=${stats.timing.modelMs}`, `tool_ms=${stats.timing.toolMs}`, `open_step_ms=${stats.timing.openMs}`], true,
+      [
+        ...(stats.steps > 30 ? ['Agent made many steps — probably looping; inspect repeated tool calls'] : ['Raise limits.timeout_s or split the task']),
+        ...(stats.timing.openMs > 0 ? ['open_step_ms: the last step never finished — a model call or a still-running command; check the last agent.tool and room.stderr'] : []),
+      ]);
   }
   if (room.idleKilled) {
     return fail('FAILED', 'IDLE_STALL', 'No output from the agent for limits.idle_timeout_s — it hung',

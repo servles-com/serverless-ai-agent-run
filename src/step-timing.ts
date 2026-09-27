@@ -15,18 +15,23 @@ export interface StepTiming {
   model_ms: number;
   tool_ms: number;
   total_ms: number;
+  // Only on a step cut off by timeout/crash/cancel: time after its last finished
+  // tool. opencode reports a tool only when it completes, so this is either a
+  // model call or a command that was still running — we cannot tell which.
+  open_ms?: number;
 }
 
 export interface StepTimingState {
   modelMs: number;
   toolMs: number;
+  openMs: number;       // unattributed tail of a step cut off by the room stopping
   stepTimings: StepTiming[];
   stepStart?: number;   // opencode timestamp of the step_start still open
   stepToolMs: number;   // tool time accumulated inside the open step
 }
 
 export function newStepTimingState(): StepTimingState {
-  return { modelMs: 0, toolMs: 0, stepTimings: [], stepToolMs: 0 };
+  return { modelMs: 0, toolMs: 0, openMs: 0, stepTimings: [], stepToolMs: 0 };
 }
 
 export function onStepStart(s: StepTimingState, timestamp: unknown): void {
@@ -51,19 +56,22 @@ export function onStepFinish(s: StepTimingState, timestamp: unknown): StepTiming
 }
 
 // A step that never got its `step_finish` (timeout / crash / cancel): close it
-// at the moment the room actually stopped, so even a TIMEOUT says whether the
-// wall time went to the model or to a tool.
+// at the moment the room actually stopped. Finished tools inside it are still
+// counted as tool time; the rest is reported as open_ms, NOT as model time — a
+// hung `sleep 600` would otherwise look exactly like a slow model.
 export function closeOpenStep(s: StepTimingState, endMs: number): StepTiming | undefined {
   if (s.stepStart === undefined) return undefined;
-  return close(s, endMs);
+  return close(s, endMs, true);
 }
 
-function close(s: StepTimingState, end: number): StepTiming {
+function close(s: StepTimingState, end: number, cutOff = false): StepTiming {
   const start = s.stepStart!;
   const total = Math.max(0, end - start);
   const toolMs = s.stepToolMs;
-  const modelMs = Math.max(0, total - toolMs);
+  const rest = Math.max(0, total - toolMs);
+  const modelMs = cutOff ? 0 : rest;
   const timing: StepTiming = { step: s.stepTimings.length + 1, model_ms: modelMs, tool_ms: toolMs, total_ms: total };
+  if (cutOff) { timing.open_ms = rest; s.openMs += rest; }
   s.stepTimings.push(timing);
   s.modelMs += modelMs;
   s.toolMs += toolMs;

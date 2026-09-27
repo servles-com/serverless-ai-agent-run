@@ -35,13 +35,14 @@ test('per-step model wait vs tool execution from a recorded event stream', () =>
   assert.equal(stats.timing.toolMs, 300);
 });
 
-test('a step left open by a timeout is closed at kill time', () => {
+test('a step left open by a timeout is closed at kill time; its tail is open_ms, not model time', () => {
   const stats = emptyStats();
   feed(stats, [stepStart(1000), toolUse(1200, 1500)]);
 
-  assert.deepEqual(closeOpenStep(stats.timing, 3000), { step: 1, model_ms: 1700, tool_ms: 300, total_ms: 2000 });
-  assert.equal(stats.timing.modelMs, 1700);
+  assert.deepEqual(closeOpenStep(stats.timing, 3000), { step: 1, model_ms: 0, tool_ms: 300, total_ms: 2000, open_ms: 1700 });
+  assert.equal(stats.timing.modelMs, 0);
   assert.equal(stats.timing.toolMs, 300);
+  assert.equal(stats.timing.openMs, 1700);
   // closed once; a second call is a no-op
   assert.equal(closeOpenStep(stats.timing, 9000), undefined);
 });
@@ -59,6 +60,9 @@ test('TIMEOUT evidence reports model_ms and tool_ms', () => {
   });
 
   assert.equal(v.diagnosis?.category, 'TIMEOUT');
-  assert.ok(v.diagnosis?.evidence.includes('model_ms=3700'), v.diagnosis?.evidence.join(','));
+  // A command hung in the last step must not be reported as a slow model.
+  assert.ok(v.diagnosis?.evidence.includes('model_ms=0'), v.diagnosis?.evidence.join(','));
   assert.ok(v.diagnosis?.evidence.includes('tool_ms=300'));
+  assert.ok(v.diagnosis?.evidence.includes('open_step_ms=3700'));
+  assert.ok(v.diagnosis?.hints.some(h => h.startsWith('open_step_ms')));
 });
