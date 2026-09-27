@@ -10,6 +10,7 @@ import { classify } from './failures.ts';
 import { startRoom, destroyRoom, listRoomContainers, containerName, type RoomHandle } from './rooms.ts';
 import { bus, emit, getRun, saveRun, runDir, runsDir, TERMINAL, type RunRecord, type RunRequest, type RunState } from './store.ts';
 import { deliver, flush, shouldDeliver, type WebhookTarget } from './webhooks.ts';
+import { hostClone, openPullRequest, repoAllowed, PullRequestError } from './pullrequest.ts';
 import { scrub } from './redact.ts';
 
 const exec = promisify(execFile);
@@ -35,6 +36,10 @@ export function validateRequest(body: any): string | undefined {
   if (body.files && typeof body.files !== 'object') return 'files must be an object {path: content}';
   for (const p of Object.keys(body.files ?? {})) if (!safeRelPath(p)) return `unsafe file path: ${p}`;
   if (body.repo && !/^https:\/\//.test(body.repo.url ?? '')) return 'repo.url must be an https URL';
+  if (body.repo?.pull_request) {
+    if (!config.githubPushToken) return 'pull_request is not enabled on this server (no SAR_GITHUB_PUSH_TOKEN)';
+    if (!repoAllowed(body.repo.url, config.prRepos)) return `pull_request not allowed for ${body.repo.url} (allowed: ${config.prRepos.join(', ') || 'none'})`;
+  }
   if (body.webhook && !/^https?:\/\//.test(body.webhook.url ?? '')) return 'webhook.url must be an http(s) URL';
   for (const s of body.secrets ?? []) if (!(s in config.secrets)) return `unknown secret "${s}" (not in server secrets file)`;
   return undefined;
@@ -155,7 +160,29 @@ async function execute(id: string): Promise<void> {
   rec.result = { text: agentStats.finalText, artifacts, steps: agentStats.steps, tool_calls: agentStats.toolCalls,
     tool_errors: agentStats.toolErrors, tokens: agentStats.tokens,
     model_ms: agentStats.timing.modelMs, tool_ms: agentStats.timing.toolMs, open_ms: agentStats.timing.openMs, step_timings: agentStats.timing.stepTimings };
-  finish(rec, classify({ agent: req.agent ?? 'opencode', room: outcome, stats: agentStats, artifacts, exportError }));
+  const verdict = classify({ agent: req.agent ?? 'opencode', room: outcome, stats: agentStats, artifacts, exportError });
+
+  // Host-side PR, only for a run that otherwise succeeded. "Nothing changed" is a
+  // failure, not a quiet success — the user's worst case is an agent that did nothing.
+  if (verdict.state === 'SUCCEEDED' && req.repo?.pull_request) {
+    const spec = req.repo.pull_request;
+    const title = spec.title ?? `[agent] ${req.task.split('\n')[0].slice(0, 80)}`;
+    const body = [spec.body ?? '', '', '---', `Run \`${id}\` · model \`${model}\` · ${agentStats.steps} steps, ${agentStats.toolCalls} tool calls`, '',
+      '<details><summary>Agent summary</summary>', '', (agentStats.finalText ?? '(none)').slice(0, 6000), '', '</details>'].join('\n');
+    try {
+      rec.result.pull_request = await openPullRequest({ runId: id, repoUrl: req.repo.url, hostRepo: join(dir, 'host-repo'),
+        workspace: join(dir, 'workspace'), spec, defaultBase: req.repo.ref, token: config.githubPushToken, title, body });
+      emit(id, 'run.pull_request', { ...rec.result.pull_request });
+    } catch (e: any) {
+      const pe = e instanceof PullRequestError ? e : new PullRequestError('PR_FAILED', String(e?.message ?? e), true);
+      verdict.state = 'FAILED';
+      verdict.diagnosis = { category: pe.category, summary: pe.message, evidence: [String(e?.stderr ?? '').slice(0, 500)].filter(Boolean),
+        retryable: pe.retryable, hints: pe.category === 'NO_CHANGES'
+          ? ['The agent reported success but did not modify the repository — see its final text in result.text']
+          : ['See run.log events and host-repo/ in the run dir'] };
+    }
+  }
+  finish(rec, verdict);
 }
 
 function finish(rec: RunRecord, v: { state: RunState; diagnosis?: RunRecord['diagnosis']; warnings: string[] }) {
@@ -184,6 +211,10 @@ async function hydrate(id: string, req: RunRequest) {
     const auth = token ? ['-c', `http.extraHeader=Authorization: Basic ${Buffer.from(`x-access-token:${token}`).toString('base64')}`] : [];
     await exec('git', [...auth, ...args, req.repo.url, ws], { timeout: 120_000, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } });
     emit(id, 'run.log', { msg: `cloned ${req.repo.url}${req.repo.ref ? '@' + req.repo.ref : ''}` });
+    if (req.repo.pull_request) {
+      await hostClone(req.repo.url, req.repo.ref, join(runDir(id), 'host-repo'), config.githubPushToken);
+      emit(id, 'run.log', { msg: 'host clone ready for pull request' });
+    }
   }
   for (const [p, content] of Object.entries(req.files ?? {})) {
     const full = join(ws, p);

@@ -1,0 +1,11 @@
+[Unit]
+Description=serverless-ai-agent-run: universe-timeline long-horizon track (one backlog task per tick)
+After=sar.service
+
+[Service]
+Type=oneshot
+User=sar
+EnvironmentFile=/etc/sar/sar.env
+EnvironmentFile=-/etc/sar/dogfood.env
+WorkingDirectory=/opt/sar
+ExecStart=/usr/bin/node scripts/dogfood-timeline.ts

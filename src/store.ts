@@ -26,7 +26,8 @@ export interface RunRequest {
   task: string;
   model?: string;
   files?: Record<string, string>;
-  repo?: { url: string; ref?: string };
+  // pull_request: the host (never the room) commits the agent's edits and opens a PR.
+  repo?: { url: string; ref?: string; pull_request?: { base?: string; title?: string; body?: string; branch?: string } };
   secrets?: string[];
   webhook?: { url: string; secret?: string; agent_events?: boolean };
   limits?: { timeout_s?: number; idle_timeout_s?: number; memory_mb?: number; cpus?: number; pids?: number };
@@ -51,6 +52,7 @@ export interface RunRecord {
   finished_at?: string;
   room?: { container: string; runtime: string; exit_code?: number | null; oom_killed?: boolean };
   result?: {
+    pull_request?: { url: string; number: number; branch: string; files_changed: number; commit: string };
     text?: string; artifacts: string[]; steps: number; tool_calls: number; tool_errors: number; tokens?: number;
     model_ms?: number; tool_ms?: number; open_ms?: number;
     step_timings?: { step: number; model_ms: number; tool_ms: number; total_ms: number; open_ms?: number }[];
