@@ -6,6 +6,7 @@ import { createWriteStream, writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { config } from './config.ts';
+import { redact } from './redact.ts';
 
 const exec = promisify(execFile);
 
@@ -96,11 +97,13 @@ export function startRoom(spec: RoomSpec): RoomHandle {
 
   createInterface({ input: child.stdout }).on('line', line => {
     lastActivity = Date.now();
+    line = redact(line);
     stdoutLog.write(line + '\n');
     spec.onStdoutLine(line);
   });
   createInterface({ input: child.stderr }).on('line', line => {
     lastActivity = Date.now();
+    line = redact(line);
     stderrLog.write(line + '\n');
     stderrTail.push(line);
     if (stderrTail.length > 80) stderrTail.shift();

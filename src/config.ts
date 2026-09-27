@@ -1,5 +1,6 @@
 import { readFileSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { setSecrets } from './redact.ts';
 
 function num(name: string, def: number): number {
   const v = process.env[name];
@@ -53,6 +54,14 @@ export const config = {
   // How long finished run dirs are kept for debugging.
   retentionHours: num('SAR_RETENTION_HOURS', 72),
 };
+
+// Register every known secret value for redaction before it can reach events,
+// logs or webhooks. Covers the secret store and provider keys (which may come
+// from process.env rather than the secrets file). See src/redact.ts.
+setSecrets([
+  ...Object.values(config.secrets),
+  ...config.providerEnv.map(k => config.secrets[k] ?? process.env[k] ?? ''),
+]);
 
 export function providerEnvValues(): Record<string, string> {
   const out: Record<string, string> = {};
