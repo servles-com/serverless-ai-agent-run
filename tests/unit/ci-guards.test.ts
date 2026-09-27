@@ -29,12 +29,14 @@ test('rule: added .only is a violation', () =>
   assert.deepEqual(focusedTestViolations([change('tests/unit/x.test.ts', ["test.only('a', () => {})"])]).map(v => v.rule), ['focused-test-added']));
 test('rule: added .skip is a violation', () =>
   assert.equal(focusedTestViolations([change('tests/unit/x.test.ts', ["it.skip('a', () => {})"])]).length, 1));
-test('rule: added skip:true option is a violation', () =>
-  assert.equal(focusedTestViolations([change('tests/unit/x.test.ts', ["test('a', { skip: true }, () => {})"])]).length, 1));
+test('rule: description mentioning skip is not a test declaration', () =>
+  assert.equal(focusedTestViolations([change('tests/unit/x.test.ts', ["test('rule: added skip is a violation', () => {})"])]).length, 0));
 test('rule: .only in a non-test file is ignored', () =>
   assert.equal(focusedTestViolations([change('src/x.ts', ['foo.only(1)'])]).length, 0));
 test('rule: plain test line is fine', () =>
   assert.equal(focusedTestViolations([change('tests/unit/x.test.ts', ["test('a', () => {})"])]).length, 0));
+test('rule: a string literal mentioning test.only mid-line is not flagged', () =>
+  assert.equal(focusedTestViolations([change('tests/unit/x.test.ts', ['assert.equal(parse("test.only(\'a\')"), 1)'])]).length, 0));
 
 // --- fix = test ---
 test('rule: src change without a test is a violation', () =>

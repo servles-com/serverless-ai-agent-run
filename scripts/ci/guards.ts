@@ -82,7 +82,10 @@ export function probeViolation(base: string[], head: string[]): Violation | null
   return { rule: 'isolation-probe-removed', message: `isolation probe(s) removed: ${removed.join(', ')}` };
 }
 
-const FOCUS_RE = /\.(?:only|skip)\s*\(|\b(?:only|skip)\s*:\s*true\b/;
+// Only lines that declare a focused/skipped test at the start of a line count —
+// this keeps string literals and test descriptions that merely mention `test.only(`
+// from tripping the rule. The `{ skip: true }` option form is out of scope.
+const FOCUS_RE = /^[ \t]*(?:test|it|describe)\.(?:only|skip)[ \t]*\(/;
 
 export function focusedTestViolations(changes: FileChange[]): Violation[] {
   const out: Violation[] = [];
