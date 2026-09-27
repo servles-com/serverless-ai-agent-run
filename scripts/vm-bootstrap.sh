@@ -45,7 +45,10 @@ log "service user + code"
 id sar >/dev/null 2>&1 || useradd --system --create-home --shell /usr/sbin/nologin sar
 usermod -aG docker sar
 if [ -n "${SAR_LOCAL_SRC:-}" ]; then            # code shipped by scripts/gcp-lab-vm.sh (private repo)
-  mkdir -p /opt/sar && cp -a "$SAR_LOCAL_SRC"/. /opt/sar/
+  # Replace, don't overlay: files deleted in the repo must not linger (a stale test from
+  # another branch broke selftest on 2026-09-28).
+  mkdir -p /opt/sar && find /opt/sar -mindepth 1 -maxdepth 1 ! -name node_modules -exec rm -rf {} +
+  cp -a "$SAR_LOCAL_SRC"/. /opt/sar/
 elif [ -d /opt/sar/.git ]; then git -C /opt/sar fetch -q && git -C /opt/sar checkout -q "$BRANCH" && git -C /opt/sar reset -q --hard "origin/$BRANCH"
 else git clone -q -b "$BRANCH" "$REPO" /opt/sar; fi
 chown -R sar:sar /opt/sar
