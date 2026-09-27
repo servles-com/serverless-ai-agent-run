@@ -28,6 +28,7 @@
 - [реализовано] PR делает хост: агент правит файлы, хост из чистого клона (без .git агента, хуки выключены) коммитит, пушит и открывает PR; allowlist репо; NO_CHANGES вместо тихого успеха — 2026-09-28
 - [реализовано] Длинный dogfood-трек universe-timeline: тик раз в 30 мин берёт issue из бэклога → ран → PR → CI проекта → merge/close, метрики в timeline-history.jsonl
 - [в работе] North Star сценарий (docs/north-star-user-scenario.md): N1–N10; эпик Google Drive/Docs #88 (3 ресёрча), capabilities-флаги #89
+- [в работе] Архитектура передачи кредов (docs/credential-passing-architecture-zerocreds-and-runs.md): хендлы cred:, креды и работа разными каналами, уровни L0–L3, T1 ссылки (основной путь), формы ZeroCreds с «скопировать как API», CLI `sar cred put`; Google — отдельный SA на пользователя через impersonation (#88)
 - [в работе] Креды без облака: ZeroCreds (сбор, write-only) → OpenBao на машине → брокер SAR → доставка через прокси; GitHub App вместо PAT; BYO vault (docs/credentials-and-secret-storage-design.md) → issues K1–K8
 - [в работе] План CI/CD-гарда и логов (docs/ci-cd-and-logging-development-plan.md) → issues C1–C7, G1–G10
 - [реализовано] Ресёрч по 6 сценариям (24 плана) сведён в итоговые планы #75 #78 #79 #81 #82 #83 (метка plan:final) — 2026-09-27
