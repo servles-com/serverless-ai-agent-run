@@ -1,0 +1,2 @@
+# Scripts source runtime config (/etc/sar/*.env) that is not in the repo.
+disable=SC1091
