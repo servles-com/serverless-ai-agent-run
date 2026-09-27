@@ -27,13 +27,15 @@
 - [реализовано] L1 CI-гарды на PR (C2): падение числа тестов, удаление проб изоляции, `.only`/`.skip`, «фикс = тест» (метка `no-test-needed`), чувствительные файлы (`security-reviewed`), размер PR > 600 строк — `scripts/ci/`, issue #18
 - [реализовано] PR делает хост: агент правит файлы, хост из чистого клона (без .git агента, хуки выключены) коммитит, пушит и открывает PR; allowlist репо; NO_CHANGES вместо тихого успеха — 2026-09-28
 - [реализовано] Длинный dogfood-трек universe-timeline: тик раз в 30 мин берёт issue из бэклога → ран → PR → CI проекта → merge/close, метрики в timeline-history.jsonl
+- [в работе] Переезд trained-assist на изолированный рантайм (docs/trained-assist-migration-plan.md): T0 быстрая защита → T1 возможности SAR → T2 адаптер → T3 пилот → … → T6 cutover
+- [планируется] Стриминг лога сессии #97 (G11): дельты, tool start/output, stream-токен рана, транскрипт
 - [в работе] North Star сценарий (docs/north-star-user-scenario.md): N1–N10; эпик Google Drive/Docs #88 (3 ресёрча), capabilities-флаги #89
 - [в работе] Архитектура передачи кредов (docs/credential-passing-architecture-zerocreds-and-runs.md): хендлы cred:, креды и работа разными каналами, уровни L0–L3, T1 ссылки (основной путь), формы ZeroCreds с «скопировать как API», CLI `sar cred put`; Google — отдельный SA на пользователя через impersonation (#88)
 - [в работе] Креды без облака: ZeroCreds (сбор, write-only) → OpenBao на машине → брокер SAR → доставка через прокси; GitHub App вместо PAT; BYO vault (docs/credentials-and-secret-storage-design.md) → issues K1–K8
 - [в работе] План CI/CD-гарда и логов (docs/ci-cd-and-logging-development-plan.md) → issues C1–C7, G1–G10
 - [реализовано] Ресёрч по 6 сценариям (24 плана) сведён в итоговые планы #75 #78 #79 #81 #82 #83 (метка plan:final) — 2026-09-27
 - [в работе] Сбор потребностей пользователя (docs/user-needs-discovery.md) — первое интервью 2026-09-27
-- [планируется] Контракт результата `expect` + EXPECTATION_NOT_MET — худший провал для юзера: «ничего не сделал молча»
+- [реализовано] Контракт результата `expect` (SB1): `artifacts` (глобы, непустые), `json`, `text` (true/регэксп), `non_empty`, `github_pr` → `FAILED/EXPECTATION_NOT_MET` со списком; без `expect` «ни текста, ни артефакта, ни PR» → `NO_DELIVERABLE`; проверки «нечего сдать» для любого не-shell агента; `expect` в задачах dogfood — 2026-09-28
 - [планируется] Мультипользовательский режим в первый месяц: ключи на юзера, owner рана, квоты, публичный HTTPS, фронтенд
 - [планируется] Платные модели через BYOK (ключ пользователя через LLM-прокси) и кастомные агенты (адаптер custom)
 - [отклонено для V0 (overkill, см. review 2026-09-27)] Мультитенантность, storage gateway room→tenant, fake object store, KMS, AUTH_REQUIRED

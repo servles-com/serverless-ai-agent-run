@@ -20,6 +20,22 @@ test('success: output, artifact, input files', async () => {
   assert.equal(await art.text(), 'payload-42');
 });
 
+test('expect: promised artifact missing -> FAILED/EXPECTATION_NOT_MET, not SUCCEEDED', async () => {
+  const run = await runAndWait({ agent: 'shell', expect: { artifacts: ['report.md'], json: ['data.json'] },
+    task: 'echo "{broken" > /artifacts/data.json; echo "all done!"' });
+  assert.equal(run.state, 'FAILED', explain(run));
+  assert.equal(run.diagnosis.category, 'EXPECTATION_NOT_MET', explain(run));
+  const ev = run.diagnosis.evidence.join('\n');
+  assert.match(ev, /artifact missing: report\.md/);
+  assert.match(ev, /json invalid: data\.json/);
+});
+
+test('expect: contract met -> SUCCEEDED', async () => {
+  const run = await runAndWait({ agent: 'shell', expect: { artifacts: ['*.md'], json: ['data.json'], text: 'done' },
+    task: 'echo "# r" > /artifacts/report.md; echo "{\\"ok\\":1}" > /artifacts/data.json; echo done' });
+  assert.equal(run.state, 'SUCCEEDED', explain(run));
+});
+
 test('crash: non-zero exit -> AGENT_CRASHED with stderr evidence', async () => {
   const run = await runAndWait({ agent: 'shell', task: 'echo "boom: something broke" >&2; exit 3' });
   assert.equal(run.state, 'FAILED', explain(run));
@@ -77,6 +93,7 @@ test('bad request is rejected up front', async () => {
   assert.equal((await api('POST', '/runs', { agent: 'shell' })).status, 400);
   assert.equal((await api('POST', '/runs', { agent: 'shell', task: 'x', files: { '../escape': 'x' } })).status, 400);
   assert.equal((await api('POST', '/runs', { agent: 'nope', task: 'x' })).status, 400);
+  assert.equal((await api('POST', '/runs', { agent: 'shell', task: 'x', expect: { artifacts: ['../x'] } })).status, 400);
 });
 
 test('webhook: signed, ordered, ends with run.completed', async () => {
