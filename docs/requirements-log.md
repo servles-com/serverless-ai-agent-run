@@ -21,6 +21,7 @@
 - [реализовано] Security checklist с проверкой на VM (docs/security-checklist.md)
 - [реализовано] Ограничение хостинга: одна голая машина, никаких облачных сервисов (GCS/Secret Manager/KMS убраны из планов); `scripts/machine.sh` по SSH — 2026-09-27
 - [реализовано] Репо публичный; branch protection main (PR + check, enforce admins); одобрение Actions для форков — 2026-09-27
+- [реализовано] L1 CI-гарды на PR (C2): падение числа тестов, удаление проб изоляции, `.only`/`.skip`, «фикс = тест» (метка `no-test-needed`), чувствительные файлы (`security-reviewed`), размер PR > 600 строк — `scripts/ci/`, issue #18
 - [в работе] План CI/CD-гарда и логов (docs/ci-cd-and-logging-development-plan.md) → issues C1–C7, G1–G10
 - [в работе] 18 ресёрчей по 6 сценариям (claude/codex/opencode) → issues с меткой research
 - [в работе] Сбор потребностей пользователя (docs/user-needs-discovery.md) — первое интервью 2026-09-27
