@@ -10,6 +10,9 @@
 
 «Serverless» — только для вызывающего. Внутри это одна VM с Docker + gVisor.
 
+> **North Star:** [docs/north-star-user-scenario.md](docs/north-star-user-scenario.md) — агенты пачками по API на своей машине,
+> каждый в своей изоляции; GitHub как полноценный житель; креды без LLM; результат всегда PR, файл или явная ошибка.
+>
 > **Хостинг: одна голая машина с SSH, никаких облачных сервисов.** Сейчас это временная
 > VM `sar-lab-1` (GCP используется только как «железо»; переезд — `SAR_SSH=... scripts/machine.sh bootstrap`).
 >
