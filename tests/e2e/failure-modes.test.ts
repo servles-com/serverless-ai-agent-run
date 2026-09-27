@@ -47,6 +47,18 @@ test('fail-fast: 3 provider errors in a row -> MODEL_PROVIDER_ERROR in seconds, 
   assert.ok(Date.now() - started < 60_000, `took ${Math.round((Date.now() - started) / 1000)}s`);
 });
 
+test('artifact symlink to a host file is neither listed nor served; the regular file is', async () => {
+  const run = await runAndWait({ agent: 'shell',
+    task: 'echo real > /artifacts/real.txt; ln -s /etc/os-release /artifacts/leak.txt; ln -s /etc /artifacts/etc; echo made' });
+  assert.equal(run.state, 'SUCCEEDED', explain(run));
+  assert.deepEqual(run.result.artifacts, ['real.txt']);
+  assert.equal((await api('GET', `/runs/${run.id}/artifacts/leak.txt`)).status, 404);
+  assert.equal((await api('GET', `/runs/${run.id}/artifacts/etc/os-release`)).status, 404);
+  const ok = await api('GET', `/runs/${run.id}/artifacts/real.txt`);
+  assert.equal(ok.status, 200);
+  assert.equal(String(ok.body).trim(), 'real');
+});
+
 test('crash: non-zero exit -> AGENT_CRASHED with stderr evidence', async () => {
   const run = await runAndWait({ agent: 'shell', task: 'echo "boom: something broke" >&2; exit 3' });
   assert.equal(run.state, 'FAILED', explain(run));

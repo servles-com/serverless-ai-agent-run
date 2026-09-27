@@ -1,5 +1,5 @@
 // Run Manager: queue + lifecycle  hydrate -> execute -> export -> sterilize.
-import { mkdirSync, writeFileSync, readdirSync, statSync, existsSync, rmSync, readFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync, readdirSync, existsSync, rmSync, readFileSync, lstatSync, closeSync } from 'node:fs';
 import { join, dirname, resolve, relative, isAbsolute } from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -12,6 +12,7 @@ import { bus, emit, getRun, saveRun, runDir, runsDir, TERMINAL, type RunRecord, 
 import { deliver, flush, shouldDeliver, type WebhookTarget } from './webhooks.ts';
 import { hostClone, openPullRequest, repoAllowed, PullRequestError } from './pullrequest.ts';
 import { scrub } from './redact.ts';
+import { listFiles, openInside, symlinkOnPath } from './safe-files.ts';
 
 const exec = promisify(execFile);
 
@@ -196,8 +197,12 @@ async function execute(id: string): Promise<void> {
     const artDir = join(dir, 'artifacts');
     const failed = checkDeliverable(req.expect, {
       agent: req.agent ?? 'opencode', text: agentStats.finalText, pullRequest: !!rec.result.pull_request,
-      artifacts: artifacts.map(p => ({ path: p, size: statSync(join(artDir, p)).size })),
-      parsesAsJson: p => { try { JSON.parse(readFileSync(join(artDir, p), 'utf8')); return true; } catch { return false; } },
+      artifacts: artifacts.map(p => ({ path: p, size: lstatSync(join(artDir, p)).size })),
+      parsesAsJson: p => {
+        const fd = openInside(artDir, p);
+        if (fd === undefined) return false;
+        try { JSON.parse(readFileSync(fd, 'utf8')); return true; } catch { return false; } finally { closeSync(fd); }
+      },
     }, verdict.warnings);
     if (failed) Object.assign(verdict, failed);
   }
@@ -236,6 +241,8 @@ async function hydrate(id: string, req: RunRequest) {
     }
   }
   for (const [p, content] of Object.entries(req.files ?? {})) {
+    const link = symlinkOnPath(ws, p);
+    if (link) throw new Error(`input file ${p}: ${link} in the workspace is a symlink; refusing to write through it`);
     const full = join(ws, p);
     mkdirSync(dirname(full), { recursive: true });
     writeFileSync(full, content);
@@ -249,17 +256,7 @@ function safeRelPath(p: string): boolean {
   return !!r && !r.startsWith('..');
 }
 
-export function listFiles(root: string, base = root): string[] {
-  if (!existsSync(root)) return [];
-  const out: string[] = [];
-  for (const name of readdirSync(root)) {
-    const full = join(root, name);
-    const st = statSync(full);
-    if (st.isDirectory()) out.push(...listFiles(full, base));
-    else if (st.isFile()) out.push(relative(base, full));
-  }
-  return out.sort();
-}
+export { listFiles };
 
 // Crash recovery: runs left non-terminal by a previous process are failed
 // with an explicit category, and their orphaned rooms are destroyed.
