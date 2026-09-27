@@ -116,6 +116,7 @@ async function execute(id: string): Promise<void> {
   const agentStats = emptyStats();
   rec.room = { container: containerName(id), runtime: config.roomRuntime || 'runc' };
   setState(rec, 'RUNNING', { model: req.agent === 'shell' ? undefined : model, limits });
+  console.log(`run ${id} RUNNING agent=${req.agent} ${req.agent === 'shell' ? '' : `model=${model} `}task=${JSON.stringify(req.task.slice(0, 80))}`);
 
   const room = startRoom({
     runId: id,
@@ -157,6 +158,10 @@ function finish(rec: RunRecord, v: { state: RunState; diagnosis?: RunRecord['dia
   if (v.diagnosis) writeFileSync(join(runDir(rec.id), 'diagnosis.json'), JSON.stringify(v.diagnosis, null, 2));
   setState(rec, v.state, { diagnosis: v.diagnosis, warnings: rec.warnings, result: rec.result });
   emit(rec.id, 'run.completed', { state: v.state, category: v.diagnosis?.category ?? 'OK' });
+  // One line per finished run in `journalctl -u sar` — the operator's first place to look.
+  const secs = rec.started_at ? Math.round((Date.parse(rec.finished_at) - Date.parse(rec.started_at)) / 1000) : 0;
+  console.log(`run ${rec.id} ${v.state} category=${v.diagnosis?.category ?? 'OK'} ${secs}s steps=${rec.result?.steps ?? 0} tools=${rec.result?.tool_calls ?? 0}` +
+    (v.diagnosis ? ` — ${v.diagnosis.summary}` : ''));
   cancelRequested.delete(rec.id);
   requests.delete(rec.id);
   void flush(rec.id).then(() => webhooks.delete(rec.id));
