@@ -249,6 +249,10 @@ GET  /healthz                     docker, runtime, образ, очередь
 поток событий сервера внутри комнаты → `agent.text.delta` (не чаще 5/с на часть), `agent.tool.start` сразу при
 запуске команды, `agent.tool.output` (вывод по мере выполнения). Образ, `rooms.ts` и сеть не меняются.
 
+Эталонный потребитель: `scripts/telegram-live.ts <run_id>` (env `SAR_STREAM_TOKEN`, `TELEGRAM_BOT_TOKEN`,
+`TELEGRAM_CHAT_ID`) — одно Telegram-сообщение, обновляется вживую (не чаще раза в 2 с), после рестарта
+продолжает с `Last-Event-ID` и правит то же сообщение; e2e против поддельного Telegram API.
+
 ---
 
 ## CLI
