@@ -9,7 +9,7 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync, readdirSync, existsSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import {
-  evaluate, isTestPath, countTests, parseProbeNames,
+  evaluate, isTestPath, countTests, parseProbeNames, parseDiff,
   type FileChange, type Violation,
 } from './guards.ts';
 
@@ -33,24 +33,6 @@ function readLabels(): string[] {
   return [];
 }
 
-function parseDiff(diff: string): FileChange[] {
-  const changes: FileChange[] = [];
-  let current: FileChange | null = null;
-  for (const line of diff.split('\n')) {
-    if (line.startsWith('+++ ')) {
-      const path = line.slice(4).trim().replace(/^b\//, '');
-      current = path === '/dev/null' ? null : { path, added: [], removed: [] };
-      if (current) changes.push(current);
-    } else if (line.startsWith('--- ') || line.startsWith('diff --git') || line.startsWith('@@') || line.startsWith('\\')) {
-      continue;
-    } else if (current && line.startsWith('+')) {
-      current.added.push(line.slice(1));
-    } else if (current && line.startsWith('-')) {
-      current.removed.push(line.slice(1));
-    }
-  }
-  return changes;
-}
 
 function collectTestSources(rev: string | null, fromDisk: boolean): { path: string; text: string }[] {
   const out: { path: string; text: string }[] = [];

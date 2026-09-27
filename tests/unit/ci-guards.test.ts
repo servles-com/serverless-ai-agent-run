@@ -5,8 +5,7 @@ import {
   testCountViolation, probeViolation, focusedTestViolations,
   fixHasTestViolation, securityReviewViolation, sizeViolation,
   SENSITIVE_SUFFIXES, NO_TEST_LABEL, SECURITY_LABEL,
-  type FileChange,
-} from '../../scripts/ci/guards.ts';
+  type FileChange, parseDiff } from '../../scripts/ci/guards.ts';
 
 const change = (path: string, added: string[] = ['x'], removed: string[] = []): FileChange => ({ path, added, removed });
 
@@ -115,4 +114,16 @@ test('evaluate reports fix-without-test when src changes alone', () => {
     testCountBase: 20, testCountHead: 20, probesBase: [], probesHead: [],
   });
   assert.deepEqual(v.map(x => x.rule), ['fix-without-test']);
+});
+
+test('parseDiff keeps a deleted file under its old path so the sensitive-file rule still fires', () => {
+  const diff = [
+    'diff --git a/src/rooms.ts b/src/rooms.ts', 'deleted file mode 100644',
+    '--- a/src/rooms.ts', '+++ /dev/null', '@@ -1,2 +0,0 @@', '-line one', '-line two',
+    'diff --git a/docs/x.md b/docs/x.md', '--- a/docs/x.md', '+++ b/docs/x.md', '@@ -1 +1 @@', '-old', '+new',
+  ].join('\n');
+  const changes = parseDiff(diff);
+  assert.deepEqual(changes.map(c => c.path), ['src/rooms.ts', 'docs/x.md']);
+  assert.equal(changes[0].removed.length, 2);
+  assert.ok(securityReviewViolation(changes, []));
 });

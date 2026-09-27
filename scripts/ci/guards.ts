@@ -134,3 +134,29 @@ export function evaluate(input: GuardInput): Violation[] {
   if (sz) out.push(sz);
   return out;
 }
+
+// Unified diff → per-file added/removed lines. A deleted file has `+++ /dev/null`;
+// it is kept under its old path so deleting a sensitive file still trips the guard.
+export function parseDiff(diff: string): FileChange[] {
+  const changes: FileChange[] = [];
+  let current: FileChange | null = null;
+  let oldPath: string | null = null;
+  for (const line of diff.split('\n')) {
+    if (line.startsWith('--- ')) {
+      const p = line.slice(4).trim();
+      oldPath = p === '/dev/null' ? null : p.replace(/^a\//, '');
+    } else if (line.startsWith('+++ ')) {
+      const p = line.slice(4).trim();
+      const path = p === '/dev/null' ? oldPath : p.replace(/^b\//, '');
+      current = path ? { path, added: [], removed: [] } : null;
+      if (current) changes.push(current);
+    } else if (line.startsWith('diff --git') || line.startsWith('@@') || line.startsWith('\\')) {
+      continue;
+    } else if (current && line.startsWith('+')) {
+      current.added.push(line.slice(1));
+    } else if (current && line.startsWith('-')) {
+      current.removed.push(line.slice(1));
+    }
+  }
+  return changes;
+}
