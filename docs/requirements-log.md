@@ -36,7 +36,6 @@
 - [реализовано] Ресёрч по 6 сценариям (24 плана) сведён в итоговые планы #75 #78 #79 #81 #82 #83 (метка plan:final) — 2026-09-27
 - [в работе] Сбор потребностей пользователя (docs/user-needs-discovery.md) — первое интервью 2026-09-27
 - [реализовано] Контракт результата `expect` (SB1): `artifacts` (глобы, непустые), `json`, `text` (true/регэксп), `non_empty`, `github_pr` → `FAILED/EXPECTATION_NOT_MET` со списком; без `expect` «ни текста, ни артефакта, ни PR» → `NO_DELIVERABLE`; проверки «нечего сдать» для любого не-shell агента; `expect` в задачах dogfood — 2026-09-28
-- [реализовано] CLI `sar` без кредов (K11, #94): `run --task … [--expect-artifact …] [--follow]` (SSE), `status`, `logs`, `artifacts [--get]`; `cred put/request` — заглушка до #92 и zerocreds-server#63 — 2026-09-28
 - [планируется] Мультипользовательский режим в первый месяц: ключи на юзера, owner рана, квоты, публичный HTTPS, фронтенд
 - [планируется] Платные модели через BYOK (ключ пользователя через LLM-прокси) и кастомные агенты (адаптер custom)
 - [отклонено для V0 (overkill, см. review 2026-09-27)] Мультитенантность, storage gateway room→tenant, fake object store, KMS, AUTH_REQUIRED
