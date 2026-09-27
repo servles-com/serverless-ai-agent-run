@@ -1,7 +1,8 @@
 // OpenCode adapter: `opencode run --format json` prints one JSON event per line:
 //   step_start | tool_use | text | step_finish | error
 import { readFileSync } from 'node:fs';
-import type { AgentAdapter, ParsedLine } from './index.ts';
+import type { AgentAdapter, AgentStats, ParsedLine } from './index.ts';
+import { StreamRedactor, redactTail } from '../redact.ts';
 import { onStepStart, onStepFinish, onTool } from '../step-timing.ts';
 
 // Live mode (`live: true`, G11): the room runs this wrapper instead of plain
@@ -50,7 +51,7 @@ export const opencodeAdapter: AgentAdapter = {
     stats.parsedLines++;
     const part = ev.part ?? {};
     switch (ev.type) {
-      case 'sar_live': return parseLive(ev);
+      case 'sar_live': return parseLive(ev, stats);
       case 'step_start':
         stats.steps++;
         onStepStart(stats.timing, ev.timestamp);
@@ -85,11 +86,23 @@ export const opencodeAdapter: AgentAdapter = {
   },
 };
 
-function parseLive(ev: Record<string, unknown>): ParsedLine | undefined {
+// Each line from the room is redacted as a whole (rooms.ts), but a secret can be
+// split across two deltas or cut by the output tail: see StreamRedactor/redactTail.
+function parseLive(ev: Record<string, unknown>, stats: AgentStats): ParsedLine | undefined {
   switch (ev.ev) {
-    case 'text_delta': return { type: 'text.delta', data: { part: ev.part, kind: ev.kind, delta: String(ev.delta ?? '').slice(0, 8000) } };
+    case 'text_delta': {
+      const parts = stats.liveParts ??= new Map();
+      const key = String(ev.part);
+      if (!parts.has(key)) parts.set(key, new StreamRedactor());
+      const delta = parts.get(key)!.push(String(ev.delta ?? ''));
+      return delta ? { type: 'text.delta', data: { part: ev.part, kind: ev.kind, delta: delta.slice(0, 8000) } } : undefined;
+    }
     case 'tool_start': return { type: 'tool.start', data: { call: ev.call, tool: ev.tool, input: truncateJson(ev.input, 1500) } };
-    case 'tool_output': return { type: 'tool.output', data: { call: ev.call, output: String(ev.output ?? '').slice(-2000) } };
+    case 'tool_output': {
+      const out = String(ev.output ?? '');
+      const cut = out.length > 2000;
+      return { type: 'tool.output', data: { call: ev.call, output: redactTail(cut ? out.slice(-2000) : out, cut || ev.truncated === true) } };
+    }
     default: return undefined;
   }
 }
