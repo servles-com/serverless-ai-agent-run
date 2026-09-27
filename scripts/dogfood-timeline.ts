@@ -16,21 +16,30 @@ const outDir = join(resolve(process.env.SAR_DATA_DIR ?? 'runtime-data'), 'report
 const history = join(outDir, 'timeline-history.jsonl');
 mkdirSync(outDir, { recursive: true });
 
-const gh = async (path: string, init: RequestInit = {}) => {
+interface Issue { number: number; title: string; body?: string | null; pull_request?: unknown }
+interface CheckRun { name: string; status: string; conclusion: string | null }
+interface RunResult {
+  id: string; state: string;
+  diagnosis?: { category: string; summary: string };
+  result?: { steps?: number; tool_calls?: number;
+    pull_request?: { url: string; number: number; commit: string; files_changed: number } };
+}
+
+const gh = async <T = unknown>(path: string, init: RequestInit = {}): Promise<{ status: number; body: T }> => {
   const res = await fetch(`https://api.github.com/repos/${REPO}${path}`, {
     ...init, headers: { authorization: `Bearer ${TOKEN}`, accept: 'application/vnd.github+json', 'content-type': 'application/json' } });
-  return { status: res.status, body: res.status === 204 ? null : await res.json() as any };
+  return { status: res.status, body: (res.status === 204 ? null : await res.json()) as T };
 };
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
 // Pick the least-attempted open agent-task issue (ties → random) so the backlog rotates.
-const issues = (await gh('/issues?state=open&labels=agent-task&per_page=100')).body.filter((i: any) => !i.pull_request);
+const issues = (await gh<Issue[]>('/issues?state=open&labels=agent-task&per_page=100')).body.filter(i => !i.pull_request);
 if (!issues.length) { console.log('no open agent-task issues'); process.exit(0); }
 const attempts = new Map<number, number>();
 if (existsSync(history)) for (const l of readFileSync(history, 'utf8').split('\n').filter(Boolean)) {
   const r = JSON.parse(l); attempts.set(r.issue, (attempts.get(r.issue) ?? 0) + 1);
 }
-issues.sort((a: any, b: any) => (attempts.get(a.number) ?? 0) - (attempts.get(b.number) ?? 0) || Math.random() - 0.5);
+issues.sort((a, b) => (attempts.get(a.number) ?? 0) - (attempts.get(b.number) ?? 0) || Math.random() - 0.5);
 const issue = issues[0];
 
 const task = `You are contributing to the open-source project in /workspace (a zoomable timeline of the universe).
@@ -47,7 +56,7 @@ How to work:
 - Finish with a short summary: what you changed, which sources you used, what you were unsure about.`;
 
 const started = Date.now();
-let run: any;
+let run: RunResult;
 try {
   run = await runAndWait({
     agent: 'opencode', model: MODEL, task,
@@ -56,9 +65,9 @@ try {
         body: `Refs #${issue.number}. Opened by the serverless-ai-agent-run dogfood loop.` } },
     limits: { timeout_s: TIMEOUT_S, idle_timeout_s: 300 },
     metadata: { track: 'timeline', issue: issue.number },
-  }, TIMEOUT_S + 200);
-} catch (e: any) {
-  run = { id: '-', state: 'HARNESS_ERROR', diagnosis: { category: 'HARNESS_ERROR', summary: e.message } };
+  }, TIMEOUT_S + 200) as RunResult;
+} catch (e) {
+  run = { id: '-', state: 'HARNESS_ERROR', diagnosis: { category: 'HARNESS_ERROR', summary: (e as Error).message } };
 }
 
 const pr = run.result?.pull_request;
@@ -66,9 +75,9 @@ let ci = 'none', merged = false;
 if (pr) {
   // Wait for the project's CI (the quality gate), then merge or close.
   for (let i = 0; i < 40; i++) {
-    const checks = (await gh(`/commits/${pr.commit}/check-runs`)).body?.check_runs ?? [];
-    const v = checks.find((c: any) => c.name === 'validate');
-    if (v?.status === 'completed') { ci = v.conclusion; break; }
+    const checks = (await gh<{ check_runs?: CheckRun[] }>(`/commits/${pr.commit}/check-runs`)).body?.check_runs ?? [];
+    const v = checks.find(c => c.name === 'validate');
+    if (v?.status === 'completed') { ci = v.conclusion ?? 'unknown'; break; }
     await sleep(15_000);
   }
   if (ci === 'success') {

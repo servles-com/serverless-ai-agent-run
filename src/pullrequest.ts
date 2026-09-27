@@ -27,6 +27,8 @@ export class PullRequestError extends Error {
   }
 }
 
+interface GitHubPull { html_url: string; number: number }
+
 export const LIMITS = { maxFiles: 200, maxBytes: 2 * 1024 * 1024 };
 
 // "https://github.com/owner/repo(.git)" -> "owner/repo"
@@ -104,8 +106,9 @@ export async function openPullRequest(opts: {
   const { stdout: sha } = await git(opts.hostRepo, ['rev-parse', 'HEAD']);
   try {
     await git(opts.hostRepo, ['push', '--force', 'origin', `HEAD:refs/heads/${branch}`], opts.token);
-  } catch (e: any) {
-    throw new PullRequestError('PR_FAILED', `push failed: ${String(e.stderr || e.message).slice(0, 500)}`, true);
+  } catch (e) {
+    const err = e as { stderr?: string; message?: string };
+    throw new PullRequestError('PR_FAILED', `push failed: ${String(err.stderr || err.message).slice(0, 500)}`, true);
   }
 
   const base = opts.spec.base ?? opts.defaultBase ?? 'main';
@@ -114,12 +117,13 @@ export async function openPullRequest(opts: {
   });
   // Re-runs for the same branch update the existing PR instead of opening a duplicate.
   const owner = slug.split('/')[0];
-  const existing = await (await gh(`/pulls?head=${owner}:${encodeURIComponent(branch)}&state=open`)).json() as any[];
-  let pr: any = existing?.[0];
+  const existing = await (await gh(`/pulls?head=${owner}:${encodeURIComponent(branch)}&state=open`)).json() as GitHubPull[];
+  let pr: GitHubPull | undefined = Array.isArray(existing) ? existing[0] : undefined;
   if (!pr) {
     const res = await gh('/pulls', { method: 'POST', body: JSON.stringify({ title: opts.title, body: opts.body, head: branch, base }) });
-    pr = await res.json();
-    if (!res.ok) throw new PullRequestError('PR_FAILED', `create PR: HTTP ${res.status} ${JSON.stringify(pr).slice(0, 300)}`, true);
+    const created = await res.json() as GitHubPull;
+    if (!res.ok) throw new PullRequestError('PR_FAILED', `create PR: HTTP ${res.status} ${JSON.stringify(created).slice(0, 300)}`, true);
+    pr = created;
   }
   return { url: pr.html_url, number: pr.number, branch, files_changed: files.length, commit: sha.trim() };
 }
