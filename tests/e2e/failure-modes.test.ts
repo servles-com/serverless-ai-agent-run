@@ -102,6 +102,7 @@ test('debug bundle explains a failure in one call', async () => {
 
 test('no room survives its run', async () => {
   const { execFileSync } = await import('node:child_process');
-  const left = execFileSync(process.env.SAR_DOCKER_BIN ?? 'docker', ['ps', '-aq', '--filter', 'label=sar.room=1']).toString().trim();
+  const left = execFileSync(process.env.SAR_DOCKER_BIN ?? 'docker', ['ps', '-aq', '--filter', 'label=sar.room=1',
+    '--filter', `label=sar.instance=${process.env.SAR_INSTANCE ?? 'main'}`]).toString().trim();
   assert.equal(left, '', `leftover rooms: ${left}`);
 });

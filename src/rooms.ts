@@ -55,7 +55,7 @@ export function startRoom(spec: RoomSpec): RoomHandle {
   const runtime = config.roomRuntime || 'runc';
   const args = [
     'run', '--name', name,
-    '--label', 'sar.room=1', '--label', `sar.run=${spec.runId}`,
+    '--label', 'sar.room=1', '--label', `sar.run=${spec.runId}`, '--label', `sar.instance=${config.instance}`,
     '--init',                                   // reap zombies, forward signals
     '--user', config.roomUser,
     '--cap-drop', 'ALL',
@@ -155,12 +155,19 @@ export async function destroyRoom(name: string): Promise<void> {
   await exec(config.docker, ['rm', '-f', '-v', name]).catch(() => {});
 }
 
-// On service start: any room still present belongs to a run whose manager died.
+// Rooms from before instance labels existed belong to the main service.
+export function ownsRoom(roomInstance: string, instance: string): boolean {
+  return (roomInstance || 'main') === instance;
+}
+
+// On service start: any room of this instance still present belongs to a run whose manager died.
 export async function listRoomContainers(): Promise<{ name: string; runId: string }[]> {
   try {
     const { stdout } = await exec(config.docker, ['ps', '-a', '--filter', 'label=sar.room=1',
-      '--format', '{{.Names}}\t{{.Label "sar.run"}}']);
-    return stdout.split('\n').filter(Boolean).map(l => { const [name, runId] = l.split('\t'); return { name, runId }; });
+      '--format', '{{.Names}}\t{{.Label "sar.run"}}\t{{.Label "sar.instance"}}']);
+    return stdout.split('\n').filter(Boolean).map(l => l.split('\t'))
+      .filter(([, , inst]) => ownsRoom(inst ?? '', config.instance))
+      .map(([name, runId]) => ({ name, runId }));
   } catch { return []; }
 }
 
