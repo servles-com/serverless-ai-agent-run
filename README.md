@@ -244,6 +244,40 @@ GET  /healthz                     docker, runtime, образ, очередь
 
 ---
 
+## CLI
+
+`cli/sar.ts` — клиент к тому же HTTP API, без зависимостей (Node ≥ 23.6 исполняет его
+напрямую; `npm link` ставит команду `sar`). В `src/` не лезет — только публичный API.
+
+```bash
+export SAR_URL=http://127.0.0.1:8787   # по умолчанию; к VM — через `gcp-lab-vm.sh tunnel`
+export SAR_TOKEN=...                   # API-токен (SAR_API_TOKEN тоже подхватывается)
+
+sar run --task "Fix calc.py and put it in /artifacts" --file calc.py \
+        --expect-artifact calc.py --follow        # события по SSE, в конце итог и диагноз
+sar run --task "..." --repo https://github.com/org/repo@main --model openrouter/... --timeout 600
+sar status <id> [--json]
+sar logs <id> [--follow]
+sar artifacts <id>                                # список
+sar artifacts <id> --get calc.py [--out file|-]   # скачать (по умолчанию в ./calc.py)
+```
+
+- `sar run` без `--follow` печатает только `run_id` (удобно в скриптах); с `--follow` события
+  идут в stderr, итог (`state`, `category`, `why`, `hint`, результат) — в stdout.
+- `--file PATH[=NAME]` — входной файл (текст) в `/workspace/NAME`; `--expect-artifact` — повторяемый,
+  превращается в `expect.artifacts`.
+- Коды выхода: `0` — ок / ран `SUCCEEDED`, `1` — ошибка API или ран не успешен, `2` — неверные аргументы.
+- `sar cred put|request` — **пока заглушка**: печатает «не реализовано», ждёт хендлов кредов (#92)
+  и API-форм ZeroCreds (Zerocreds-com/zerocreds-server#63).
+
+Тесты: `tests/unit/cli-args.test.ts` (разбор аргументов, сборка запроса, SSE-парсер, вывод) и
+`tests/e2e/cli.test.ts` — **требует docker и образ комнаты**, гоняется против запущенного сервера
+как остальные e2e (`SAR_INSECURE_DEV=1 npm start`, потом `node --test tests/e2e/cli.test.ts`).
+На Docker Desktop `SAR_DATA_DIR` должен лежать в расшаренной папке (не `/tmp`), иначе bind-mount
+`resolv.conf` не монтируется и ран падает `ROOM_START_FAILED`. В `selftest.sh` на VM не входит.
+
+---
+
 ## Эксплуатация
 
 ```bash
@@ -297,11 +331,12 @@ src/webhooks.ts      подписанные вебхуки по порядку, 
 src/adapters/        opencode (поток JSON-событий), shell (для тестов)
 src/store.ts         раны на диске
 src/creds/           хендлы кредов, файловый бэкенд, брокер с аудитом (ещё не подключено к рану)
+cli/sar.ts           CLI `sar`: run / status / logs / artifacts (клиент API)
 room-image/          образ комнаты (node + opencode + git + python)
 scripts/             bootstrap, сетевая политика, selftest, dogfood, burst, status, machine (SSH), gcp-lab-vm
 deploy/              systemd-юниты, пример secrets
-tests/unit           классификатор (18)
-tests/e2e            сценарии падений (13), изоляция (11 проб), живой opencode
+tests/unit           классификатор (18), разбор аргументов CLI
+tests/e2e            сценарии падений (13), изоляция (11 проб), живой opencode, CLI
 tests/dogfood        задачи для dogfood
 docs/                архитектура, безопасность, roadmap, лог требований, ревью, находки
 ```

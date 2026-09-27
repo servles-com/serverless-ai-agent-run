@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "bin": { "sar": "cli/sar.ts" },
   "description": "Isolated, ephemeral AI-agent runs on a VM behind an HTTP API with webhooks",
   "engines": { "node": ">=23.6" },
   "scripts": {
@@ -10,6 +11,7 @@
     "typecheck": "tsc --noEmit",
     "test:unit": "node --test tests/unit/*.test.ts",
     "test:e2e": "node --test --test-concurrency=1 tests/e2e/*.test.ts",
+    "sar": "node cli/sar.ts",
     "selftest": "bash scripts/selftest.sh",
     "dogfood": "node scripts/dogfood-free-models.ts",
     "lint": "eslint .",
