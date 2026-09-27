@@ -1,0 +1,32 @@
+# Browser Operating Room image (spike, issue #89 / N6 `capabilities: ["browser"]`).
+# A layer on top of the regular opencode room image: same agent, same user model,
+# plus a headless Chromium driven by Playwright. Light runs keep using the base image.
+#
+#   docker build -t sar-room-opencode room-image
+#   docker build -f room-image/Dockerfile.browser -t sar-room-browser room-image
+#
+# Findings and numbers: docs/2026-09-28 browser room image spike.md
+ARG BASE_IMAGE=sar-room-opencode:latest
+FROM ${BASE_IMAGE}
+
+# Playwright pins its own Chromium build; the npm package and the browser must match,
+# so both come from the same version. `--only-shell` installs chrome-headless-shell
+# (no full headed Chromium, no ffmpeg); `--with-deps` pulls the minimal Debian libs.
+ARG PLAYWRIGHT_VERSION=1.63.0
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright \
+    PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 \
+    NODE_PATH=/usr/local/lib/node_modules
+RUN npm install -g playwright@${PLAYWRIGHT_VERSION} && npm cache clean --force \
+ && PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD= playwright install --with-deps --only-shell chromium \
+ && rm -rf /var/lib/apt/lists/* /tmp/* /root/.cache \
+ && chmod -R a+rX /opt/ms-playwright \
+ && mkdir -p /node_modules \
+ && ln -s /usr/local/lib/node_modules/playwright /usr/local/lib/node_modules/playwright/node_modules/playwright-core /node_modules/
+# ESM `import 'playwright'` ignores NODE_PATH and resolves by walking up from the
+# script's dir, so /node_modules makes it work from /workspace, /tmp, /artifacts.
+
+# Rooms run as an arbitrary non-root uid with --cap-drop ALL, so Chromium's own
+# sandbox (user namespaces / setuid helper) is unavailable: launch with
+# chromiumSandbox: false (Playwright default) — the room (gVisor) is the sandbox.
+# Crash reports and profile go to HOME (/home/agent, 1777) and /tmp (tmpfs).
+WORKDIR /workspace
