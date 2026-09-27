@@ -42,8 +42,16 @@ export function isSrcPath(path: string): boolean {
   return path.startsWith('src/');
 }
 
+// Directories whose every file is sensitive: the guard itself and the workflows
+// that run it. Without this a PR could switch the guard off in the same change.
+export const SENSITIVE_PREFIXES = [
+  'scripts/ci/',
+  '.github/workflows/',
+];
+
 export function isSensitivePath(path: string): boolean {
-  return SENSITIVE_SUFFIXES.some(s => path === s || path.endsWith('/' + s));
+  return SENSITIVE_SUFFIXES.some(s => path === s || path.endsWith('/' + s))
+    || SENSITIVE_PREFIXES.some(p => path.startsWith(p));
 }
 
 export function hasLabel(labels: string[], name: string): boolean {
