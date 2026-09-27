@@ -10,6 +10,8 @@
 //   GET  /runs/:id/artifacts         list
 //   GET  /runs/:id/artifacts/<path>  download
 //   POST /runs/:id/cancel
+//   POST /batches                    N tasks -> N runs, at most `concurrency` at a time (src/batches.ts)
+//   GET  /batches[/:id[/report]]     summary / markdown report; POST /batches/:id/cancel
 //   GET  /healthz                    docker/runtime/image checks (no auth)
 //
 // Auth: the master API token, or a run's stream_token (read-only, that run only).
@@ -22,6 +24,7 @@ import { bus, createRun, getRun, listRuns, readEvents, runDir, TERMINAL, type Ru
 import { cancel, enqueue, gcOldRuns, reconcileOnStartup, stats, validateRequest, listFiles } from './runner.ts';
 import { dockerHealth } from './rooms.ts';
 import { openInside } from './safe-files.ts';
+import { batchSummary, cancelBatch, createBatch, expandBatch, getBatch, listBatches, reportMarkdown, resumeBatches } from './batches.ts';
 import { isStreamToken, issueStreamToken, presentedToken, renderTranscript, streamRun, streamTokenAllows } from './stream.ts';
 
 function send(res: ServerResponse, code: number, body: unknown) {
@@ -155,6 +158,35 @@ addRoute('GET', '/runs/:id/artifacts/*', ({ res, rest, dir }) => {
   return void createReadStream('', { fd }).pipe(res);
 });
 
+addRoute('POST', '/batches', async ({ req, res }) => {
+  const x = expandBatch(await readBody(req), config.maxRooms);
+  if ('error' in x) return send(res, 400, { error: x.error });
+  const b = createBatch(x.items, x.concurrency);
+  return send(res, 202, { id: b.id, state: batchSummary(b).state, total: b.items.length, concurrency: b.concurrency,
+    links: { self: `/batches/${b.id}`, report: `/batches/${b.id}/report` } });
+});
+
+addRoute('GET', '/batches', ({ res, url }) => send(res, 200, listBatches(Number(url.searchParams.get('limit') ?? 50)).map(b => {
+  const s = batchSummary(b);
+  return { id: b.id, created_at: b.created_at, state: s.state, total: s.total, done: s.done, succeeded: s.succeeded };
+})));
+
+addRoute('GET', '/batches/*', ({ res, rest }) => {
+  const b = getBatch(rest[0] ?? '');
+  if (!b || rest.length > 2 || (rest[1] && rest[1] !== 'report')) return send(res, 404, { error: 'batch not found' });
+  if (rest[1] === 'report') {
+    res.writeHead(200, { 'content-type': 'text/markdown; charset=utf-8' });
+    return void res.end(reportMarkdown(batchSummary(b)));
+  }
+  return send(res, 200, batchSummary(b));
+});
+
+addRoute('POST', '/batches/*', ({ res, rest }) => {
+  if (rest.length !== 2 || rest[1] !== 'cancel') return send(res, 404, { error: 'not found' });
+  const b = cancelBatch(rest[0]);
+  return b ? send(res, 202, { id: b.id, cancel_requested: true }) : send(res, 404, { error: 'batch not found' });
+});
+
 async function handle(req: IncomingMessage, res: ServerResponse) {
   const url = new URL(req.url ?? '/', 'http://x');
   const parts = url.pathname.split('/').filter(Boolean);
@@ -191,6 +223,8 @@ async function main() {
   }
   const orphaned = await reconcileOnStartup();
   if (orphaned.length) console.log(`reconciled ${orphaned.length} orphaned runs: ${orphaned.join(', ')}`);
+  const resumed = resumeBatches();
+  if (resumed) console.log(`resumed ${resumed} batches with pending items`);
   setInterval(() => { const n = gcOldRuns(); if (n) console.log(`gc: removed ${n} old runs`); }, 3600_000).unref();
 
   createServer((req, res) => {
