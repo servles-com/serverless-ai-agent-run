@@ -32,7 +32,7 @@ export const config = {
   // "runsc" on the lab VM (gVisor); empty = default runc (e.g. local Docker Desktop).
   roomRuntime: process.env.SAR_ROOM_RUNTIME ?? '',
   roomNetwork: process.env.SAR_ROOM_NETWORK ?? 'sar-rooms',
-  // Explicit resolvers: gVisor's netstack bypasses docker's embedded DNS (127.0.0.11).
+  // Resolvers written into the room's /etc/resolv.conf (see rooms.ts).
   roomDns: (process.env.SAR_ROOM_DNS ?? '1.1.1.1,8.8.8.8').split(',').filter(Boolean),
   // Rooms run as the service uid by default so bind-mounted workspaces stay writable.
   roomUser: process.env.SAR_ROOM_USER ?? `${process.getuid?.() ?? 1000}:${process.getgid?.() ?? 1000}`,

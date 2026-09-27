@@ -2,7 +2,7 @@
 // Agent adapters only decide *what command* runs inside an already prepared room.
 import { spawn, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { createWriteStream, writeFileSync } from 'node:fs';
+import { createWriteStream, writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { config } from './config.ts';
@@ -40,6 +40,13 @@ export interface RoomHandle {
   cancel: () => void;
 }
 
+function resolvConf(): string {
+  const file = join(config.dataDir, 'room-resolv.conf');
+  mkdirSync(config.dataDir, { recursive: true });
+  writeFileSync(file, config.roomDns.map(d => `nameserver ${d}`).join('\n') + '\n');
+  return file;
+}
+
 export const containerName = (runId: string) => `sar-${runId.replace(/_/g, '-')}`;
 
 export function startRoom(spec: RoomSpec): RoomHandle {
@@ -64,7 +71,9 @@ export function startRoom(spec: RoomSpec): RoomHandle {
   ];
   if (config.roomRuntime) args.push('--runtime', config.roomRuntime);
   if (config.roomNetwork) args.push('--network', config.roomNetwork);
-  for (const d of config.roomDns) args.push('--dns', d);
+  // Docker writes `nameserver 127.0.0.11` (its embedded DNS) for user-defined networks
+  // even with --dns, and gVisor's netstack cannot reach it -> mount our own resolv.conf.
+  if (config.roomDns.length) args.push('-v', `${resolvConf()}:/etc/resolv.conf:ro`);
   // Values are passed via the child's environment (`-e NAME` without =value),
   // so secrets never appear in `ps` output on the host.
   for (const k of Object.keys(spec.env)) args.push('-e', k);
