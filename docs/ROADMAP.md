@@ -31,11 +31,11 @@ Scope revised 2026-09-27, see `docs/2026-09-27 draft review and V0 launch plan.m
 
 ## V0.5 — persistent storage
 
-- [ ] GCS bucket in the same region as the VM
+- [ ] durable run/artifact store on the machine's disk (sqlite index + files), disk budget
 - [ ] storage gateway
 - [ ] hydrate selected inputs
 - [ ] export selected artifacts
-- [ ] no broad GCS credential inside the room
+- [ ] no storage credential inside the room (artifacts only via bind mounts / API)
 - [ ] deleting local room/cache does not remove durable data
 
 ## V0.6 — repository preparation
@@ -48,7 +48,7 @@ Scope revised 2026-09-27, see `docs/2026-09-27 draft review and V0 launch plan.m
 
 ## V0.7 — secrets/capabilities
 
-- [ ] Secret Manager integration
+- [ ] per-user secret files on the machine (root-owned, never mounted into rooms)
 - [ ] runtime-scoped provider credentials
 - [ ] narrow tool/capability gateway
 - [ ] secret redaction from logs

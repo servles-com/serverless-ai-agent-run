@@ -56,7 +56,7 @@ Secrets must not be baked into images or persisted in room snapshots.
 Target pattern:
 
 ```text
-Secret Manager / KMS
+secret files on the machine (root-owned)
         ↓
 trusted capability gateway
         ↓
