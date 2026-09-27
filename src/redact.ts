@@ -20,6 +20,12 @@ export function setSecrets(values: Iterable<string>): void {
   active = [...seen].sort((a, b) => b.length - a.length);
 }
 
+// Values learned at runtime (credentials resolved for a run, see src/creds/broker.ts)
+// are added on top of the startup set.
+export function addSecrets(values: Iterable<string>): void {
+  setSecrets([...active, ...values]);
+}
+
 export function redact(text: string): string {
   if (!text || active.length === 0) return text;
   let out = text;
