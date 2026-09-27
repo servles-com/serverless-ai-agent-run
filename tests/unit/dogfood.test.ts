@@ -61,3 +61,10 @@ test('SILENT_FAILURE only when SUCCEEDED delivered nothing at all (#7)', () => {
   assert.equal(dogfoodCategory({ id: 'r', state: 'SUCCEEDED', result: { text: ' ', artifacts: [] } }), 'SILENT_FAILURE');
   assert.equal(dogfoodCategory({ id: 'r', state: 'FAILED', diagnosis: { category: 'EXPECTATION_NOT_MET' } }), 'EXPECTATION_NOT_MET');
 });
+
+test('a run that never left the queue is QUEUE_TIMEOUT, not HARNESS_ERROR', async () => {
+  const { QueueTimeoutError } = await import('../lib/client.ts');
+  const row = harnessErrorRun(new QueueTimeoutError('run run_q waited in the queue for more than 1800s', 'run_q'));
+  assert.equal(row.state, 'QUEUE_TIMEOUT');
+  assert.equal(row.id, 'run_q');
+});

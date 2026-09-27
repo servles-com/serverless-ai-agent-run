@@ -1,7 +1,14 @@
 // OpenCode adapter: `opencode run --format json` prints one JSON event per line:
 //   step_start | tool_use | text | step_finish | error
-import type { AgentAdapter } from './index.ts';
+import { readFileSync } from 'node:fs';
+import type { AgentAdapter, ParsedLine } from './index.ts';
 import { onStepStart, onStepFinish, onTool } from '../step-timing.ts';
+
+// Live mode (`live: true`, G11): the room runs this wrapper instead of plain
+// `opencode run`; it adds `sar_live` lines (text deltas, tool start and output as it
+// happens). Passed via `node -e`, so the room image needs no change.
+const LIVE_WRAPPER = readFileSync(new URL('./opencode-live.mjs', import.meta.url), 'utf8');
+const LIVE_PORT = '4096';
 
 const SYSTEM_HINT = [
   'You are running unattended inside an isolated, disposable sandbox.',
@@ -9,14 +16,30 @@ const SYSTEM_HINT = [
   'Nobody will answer questions: make reasonable assumptions and finish the task.',
 ].join(' ');
 
+// Models come from the owner's LLM ladder (github.com/trained-assist/trained-assist-llm-ladder):
+// OpenCode Go first, then Zen / OpenRouter :free, then cheap paid — with key rotation and
+// model health inside the ladder. Do NOT point rooms at OpenRouter directly: one account's
+// free quota is gone in a few runs (2026-09-28). The token comes from provider env
+// (LLM_LADDER_TOKEN) and is referenced, not inlined.
+const LADDER_PROVIDER = {
+  ladder: {
+    npm: '@ai-sdk/openai-compatible',
+    name: 'trained-assist LLM ladder',
+    options: { baseURL: process.env.SAR_LADDER_URL ?? 'https://llm-ladder.trainedassist.store/v1', apiKey: '{env:LLM_LADDER_TOKEN}' },
+    models: { free: { name: 'free ladder (Go → Zen/OpenRouter free → cheap paid)', tool_call: true } },
+  },
+};
+
 export const opencodeAdapter: AgentAdapter = {
   name: 'opencode',
-  command: (req, model) => [
-    'opencode', 'run', '--pure', '--auto', '--format', 'json', '--print-logs', '--log-level', 'WARN',
-    '-m', model, `${SYSTEM_HINT}\n\nTASK:\n${req.task}`,
-  ],
+  command: (req, model) => {
+    const args = ['--auto', '--format', 'json', '--print-logs', '--log-level', 'WARN', '-m', model, `${SYSTEM_HINT}\n\nTASK:\n${req.task}`];
+    return req.live
+      ? ['node', '--input-type=module', '-e', LIVE_WRAPPER, LIVE_PORT, ...args]
+      : ['opencode', 'run', '--pure', ...args];
+  },
   env: () => ({
-    OPENCODE_CONFIG_CONTENT: JSON.stringify({ autoupdate: false, share: 'disabled' }),
+    OPENCODE_CONFIG_CONTENT: JSON.stringify({ autoupdate: false, share: 'disabled', provider: LADDER_PROVIDER }),
   }),
   parse(line, stats) {
     let ev: any;
@@ -27,6 +50,7 @@ export const opencodeAdapter: AgentAdapter = {
     stats.parsedLines++;
     const part = ev.part ?? {};
     switch (ev.type) {
+      case 'sar_live': return parseLive(ev);
       case 'step_start':
         stats.steps++;
         onStepStart(stats.timing, ev.timestamp);
@@ -60,6 +84,15 @@ export const opencodeAdapter: AgentAdapter = {
     }
   },
 };
+
+function parseLive(ev: Record<string, unknown>): ParsedLine | undefined {
+  switch (ev.ev) {
+    case 'text_delta': return { type: 'text.delta', data: { part: ev.part, kind: ev.kind, delta: String(ev.delta ?? '').slice(0, 8000) } };
+    case 'tool_start': return { type: 'tool.start', data: { call: ev.call, tool: ev.tool, input: truncateJson(ev.input, 1500) } };
+    case 'tool_output': return { type: 'tool.output', data: { call: ev.call, output: String(ev.output ?? '').slice(-2000) } };
+    default: return undefined;
+  }
+}
 
 function truncateJson(v: unknown, max: number): unknown {
   const s = JSON.stringify(v);

@@ -1,5 +1,5 @@
 // Pure helpers of the dogfood loop (unit-tested in tests/unit/dogfood.test.ts).
-import { describeError } from '../tests/lib/client.ts';
+import { describeError, QueueTimeoutError } from '../tests/lib/client.ts';
 
 export interface RunView {
   id: string; state: string;
@@ -9,8 +9,10 @@ export interface RunView {
 
 // A client-side failure: the harness lost the run, not the runtime. Keeps the run id
 // when it is known, so the issue gets a /debug bundle instead of `null` (#86).
+// A run that never got a room in time is QUEUE_TIMEOUT: the queue, not the runtime.
 export function harnessErrorRun(e: unknown): RunView {
-  return { id: (e as { runId?: string })?.runId ?? '-', state: 'HARNESS_ERROR', diagnosis: { category: 'HARNESS_ERROR', summary: describeError(e) } };
+  const cat = e instanceof QueueTimeoutError ? 'QUEUE_TIMEOUT' : 'HARNESS_ERROR';
+  return { id: (e as { runId?: string })?.runId ?? '-', state: cat, diagnosis: { category: cat, summary: describeError(e) } };
 }
 
 // Since SB1 the runtime itself fails "done, but delivered nothing" (NO_DELIVERABLE /

@@ -45,21 +45,32 @@ export class RunWaitError extends Error {
   constructor(message: string, runId?: string) { super(message); this.runId = runId; }
 }
 
-// `graceMs`: how long the API may be unreachable (e.g. `sar` restarting on deploy)
-// before giving up. The run itself survives or ends as ORPHANED_BY_RESTART.
-export async function runAndWait(req: Record<string, unknown>, maxS = 300, graceMs = 90_000): Promise<any> {
+// Waits for a terminal state. `maxS` counts from when the run leaves QUEUED: time
+// spent waiting for a free room is not the run's fault. A run stuck in the queue
+// longer than `maxQueueS` is cancelled and throws QueueTimeoutError. `graceMs`: how
+// long the API may be unreachable (e.g. `sar` restarting on deploy) before giving up;
+// the run itself survives or ends as ORPHANED_BY_RESTART.
+export class QueueTimeoutError extends RunWaitError {}
+export async function runAndWait(req: Record<string, unknown>, maxS = 300, graceMs = 90_000, maxQueueS = 1800): Promise<any> {
   let created: any;
   try { created = await withRetry(() => api('POST', '/runs', req), 'POST', graceMs); } catch (e) { throw new RunWaitError(`create: ${describeError(e)}`); }
   if (created.status !== 202) throw new RunWaitError(`create failed: ${JSON.stringify(created.body)}`);
   const id = created.body.id;
-  const deadline = Date.now() + maxS * 1000;
-  while (Date.now() < deadline) {
+  const t0 = Date.now();
+  let startedAt: number | undefined;
+  for (;;) {
     let r: any;
     try { r = await withRetry(() => api('GET', `/runs/${id}`), 'GET', graceMs); } catch (e) { throw new RunWaitError(`poll ${id}: ${describeError(e)}`, id); }
-    if (['SUCCEEDED', 'FAILED', 'CANCELLED', 'TIMED_OUT'].includes(r.body?.state)) return r.body;
+    const state = r.body?.state;
+    if (['SUCCEEDED', 'FAILED', 'CANCELLED', 'TIMED_OUT'].includes(state)) return r.body;
+    if (state !== 'QUEUED' && startedAt === undefined) startedAt = Date.now();
+    if (startedAt === undefined && Date.now() - t0 > maxQueueS * 1000) {
+      await api('POST', `/runs/${id}/cancel`).catch(() => {});
+      throw new QueueTimeoutError(`run ${id} waited in the queue for more than ${maxQueueS}s`, id);
+    }
+    if (startedAt !== undefined && Date.now() - startedAt > maxS * 1000) throw new RunWaitError(`run ${id} did not finish in ${maxS}s after start`, id);
     await new Promise(res => setTimeout(res, 500));
   }
-  throw new RunWaitError(`run ${id} did not finish in ${maxS}s`, id);
 }
 
 export function explain(run: any): string {

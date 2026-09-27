@@ -15,8 +15,9 @@ import { runAndWait } from '../tests/lib/client.ts';
 import { dogfoodCategory, harnessErrorRun } from './dogfood-lib.ts';
 
 const models = (process.env.SAR_DOGFOOD_MODELS ?? [
-  'openrouter/nvidia/nemotron-3-super-120b-a12b:free',
-  'openrouter/nvidia/nemotron-3.5-lightning:free',
+  // The owner's ladder (Go first). Direct OpenRouter :free models only via
+  // SAR_DOGFOOD_MODELS for comparisons — one account's daily free quota is tiny.
+  'ladder/free',
 ].join(',')).split(',');
 const only = process.env.SAR_DOGFOOD_TASKS?.split(',');
 const tasks = JSON.parse(readFileSync(new URL('../tests/dogfood/tasks.json', import.meta.url), 'utf8'))
