@@ -36,7 +36,7 @@ export interface RunRequest {
   expect?: Expect;               // result contract, see checkDeliverable() in failures.ts
   credentials?: CredentialSpec[]; // references only (cred:<name>), resolved by the broker; see src/creds/
   live?: boolean;                // opencode: stream text deltas and running tools (agent.text.delta, agent.tool.start/output)
-  limits?: { timeout_s?: number; idle_timeout_s?: number; memory_mb?: number; cpus?: number; pids?: number };
+  limits?: { timeout_s?: number; idle_timeout_s?: number; memory_mb?: number; cpus?: number; pids?: number; disk_mb?: number };
   metadata?: Record<string, unknown>;
 }
 

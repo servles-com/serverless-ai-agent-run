@@ -14,6 +14,7 @@ export interface Facts {
   stats: AgentStats;
   artifacts: string[];
   exportError?: string;
+  diskFull?: boolean;              // the run's disk volume was (nearly) full when the room stopped
   // Gateway refused a credential during the run (src/gateway.ts takeErrors).
   credentialErrors?: { code: 'CREDENTIAL_MISSING' | 'CREDENTIAL_REVOKED'; ref: string }[];
   failFast?: FailFastState;    // set when the runner stopped the room early (SB3)
@@ -108,6 +109,12 @@ export function classify(f: Facts): Verdict {
       [`exit_code=${room.exitCode}`, ...tail(4)], false,
       ['Raise limits.memory_mb', 'Check what the agent was running in the last tool events']);
   }
+  if (f.diskFull && (room.exitCode !== 0 || stats.toolErrors > 0)) {
+    return fail('FAILED', 'DISK_QUOTA_EXCEEDED', 'The run filled its disk quota (/workspace + /artifacts) and then failed',
+      [`exit_code=${room.exitCode}`, `tool_errors=${stats.toolErrors}`, ...tail(4)], false,
+      ['Raise limits.disk_mb (up to the server max)', 'Look for runaway output files or large downloads in the last tool events']);
+  }
+  if (f.diskFull) warnings.push('the run\'s disk quota is full — results may be incomplete');
   // Timeout/stall while the provider kept erroring and the agent never got a
   // single tool call through: the model side is the cause, not the agent.
   // (Seen in dogfood: OpenRouter 504 "stream error" + opencode retries every ~2 min.)

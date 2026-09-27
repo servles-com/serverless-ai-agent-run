@@ -14,6 +14,7 @@ import { attachRoom, isCancelRequested, release, requestOf, startQueue, type Com
 import { hydrate, roomSpec, resolveCredentialEnv, CredentialError } from './run-env.ts';
 import { listFiles, settleDeliverables } from './deliverables.ts';
 import { scrub } from './redact.ts';
+import { createVolume, releaseVolume, volumeFull } from './volume.ts';
 
 export { enqueue, cancel, stats } from './queue.ts';
 export { validateRequest } from './run-env.ts';
@@ -38,6 +39,17 @@ async function execute(id: string): Promise<void> {
   // --- hydrate
   setState(rec, 'PREPARING');
   rec.started_at = new Date().toISOString();
+  const diskMb = req.limits?.disk_mb ?? config.defaults.diskMb;
+  if (diskMb > 0) {
+    try {
+      await createVolume(dir, diskMb);
+      emit(id, 'run.log', { msg: `workspace volume: ${diskMb} MB` });
+    } catch (e: any) {
+      return finish(rec, { state: 'FAILED', warnings: [], diagnosis: { category: 'ROOM_START_FAILED',
+        summary: 'Could not create the run\'s disk volume (quota)', evidence: [String(e.stderr || e.message).slice(0, 1000)],
+        retryable: true, hints: ['Check the sudoers rule for sar-run-volume and free disk space on the host (vm-bootstrap.sh)'] } });
+    }
+  }
   try {
     await hydrate(id, req);
   } catch (e: any) {
@@ -62,15 +74,24 @@ async function execute(id: string): Promise<void> {
     emit(id, 'run.log', { msg: `fail-fast: ${failFast.errors} provider errors in a row, stopping the room` });
     void exec(config.docker, ['kill', containerName(id)]).catch(() => {});
   };
+  // Raw output lines become events too; cap them like the log files (checklist 1.13).
+  let outputBytes = 0;
+  const withinOutputCap = (line: string): boolean => {
+    if (outputBytes > config.roomLogMaxBytes) return false;
+    outputBytes += line.length + 1;
+    if (outputBytes <= config.roomLogMaxBytes) return true;
+    emit(id, 'run.log', { msg: `output events truncated at ${config.roomLogMaxBytes} bytes; the run continues` });
+    return false;
+  };
   const spec = roomSpec(id, req, model, {
     onStdoutLine: line => {
       const parsed = adapter.parse(line, agentStats);
-      if (parsed) emit(id, `agent.${parsed.type}`, parsed.data);
+      if (parsed && (parsed.type !== 'stdout' || withinOutputCap(line))) emit(id, `agent.${parsed.type}`, parsed.data);
       // Provider errors are counted from stderr only (opencode logs each one there once).
       if (parsed?.type === 'tool' || parsed?.type === 'text' || parsed?.type === 'step_finish') observeFailFast(failFast, { progress: true });
     },
     onStderrLine: line => {
-      if (line.trim()) emit(id, 'room.stderr', { line: line.slice(0, 2000) });
+      if (line.trim() && withinOutputCap(line)) emit(id, 'room.stderr', { line: line.slice(0, 2000) });
       if (observeFailFast(failFast, { stderr: line })) stopEarly();
     },
   }, credEnv);
@@ -81,6 +102,7 @@ async function execute(id: string): Promise<void> {
   const room = startRoom(spec);
   attachRoom(id, room);
   const outcome = await room.done;
+  const diskFull = volumeFull(dir);
   // A step still open when the room stopped (timeout/crash/cancel) never got a
   // step_finish: close it at kill time so TIMEOUT evidence still splits model
   // wait from tool execution.
@@ -100,12 +122,15 @@ async function execute(id: string): Promise<void> {
   const result = rec.result = { text: agentStats.finalText, artifacts, steps: agentStats.steps, tool_calls: agentStats.toolCalls,
     tool_errors: agentStats.toolErrors, tokens: agentStats.tokens,
     model_ms: agentStats.timing.modelMs, tool_ms: agentStats.timing.toolMs, open_ms: agentStats.timing.openMs, step_timings: agentStats.timing.stepTimings };
-  const verdict = classify({ agent: req.agent ?? 'opencode', room: outcome, stats: agentStats, artifacts, exportError, failFast });
+  const verdict = classify({ agent: req.agent ?? 'opencode', room: outcome, stats: agentStats, artifacts, exportError, failFast, diskFull });
   await settleDeliverables({ id, result, req, model, stats: agentStats, artifacts, verdict });
   finish(rec, verdict);
 }
 
 function finish(rec: RunRecord, v: Completion) {
+  // Artifacts go back to the plain run dir before anyone hears the run is done.
+  const volumeError = releaseVolume(runDir(rec.id));
+  if (volumeError) v.warnings.push(`disk volume release failed: ${volumeError}`);
   rec.diagnosis = v.diagnosis;
   rec.warnings = v.warnings.length ? v.warnings : undefined;
   rec.finished_at = new Date().toISOString();
@@ -143,6 +168,7 @@ export function gcOldRuns(): number {
   for (const id of readdirSync(runsDir())) {
     const rec = getRun(id);
     if (rec && TERMINAL.includes(rec.state) && Date.parse(rec.updated_at) < cutoff) {
+      if (releaseVolume(runDir(id))) continue;   // still mounted: never rm -r through a mount
       rmSync(runDir(id), { recursive: true, force: true });
       n++;
     }

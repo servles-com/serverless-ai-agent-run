@@ -32,6 +32,7 @@ export const SENSITIVE_SUFFIXES = [
   'room-image/Dockerfile',
   'scripts/vm-bootstrap.sh',
   'tests/e2e/isolation.test.ts',
+  'scripts/sar-run-volume.sh',     // runs as root via sudo (per-run disk quota)
 ];
 
 export function isTestPath(path: string): boolean {

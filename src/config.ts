@@ -45,6 +45,8 @@ export const config = {
     timeoutS: num('SAR_DEFAULT_TIMEOUT_S', 900),
     idleTimeoutS: num('SAR_DEFAULT_IDLE_TIMEOUT_S', 240),
     memoryMb: num('SAR_DEFAULT_MEMORY_MB', 1024),
+    // Per-run disk quota for /workspace + /artifacts (src/volume.ts). 0 = off (local dev).
+    diskMb: num('SAR_DEFAULT_DISK_MB', 0),
     cpus: num('SAR_DEFAULT_CPUS', 1),
     pids: num('SAR_DEFAULT_PIDS', 512),
     // The owner's LLM ladder (Go → Zen/OpenRouter free → cheap paid); see adapters/opencode.ts.
@@ -76,6 +78,11 @@ export const config = {
   retentionHours: num('SAR_RETENTION_HOURS', 72),
   // SSE keep-alive comment interval for /runs/:id/stream (src/stream.ts).
   streamHeartbeatS: num('SAR_STREAM_HEARTBEAT_S', 15),
+
+  maxDiskMb: num('SAR_MAX_DISK_MB', 8192),
+  volumeHelper: process.env.SAR_VOLUME_HELPER ?? '/usr/local/sbin/sar-run-volume',
+  // Cap on each room log file (stdout.log, stderr.log) and on streamed output events per run.
+  roomLogMaxBytes: num('SAR_ROOM_LOG_MAX_MB', 20) * 1024 * 1024,
 };
 
 // Register every known secret value for redaction before it can reach events,

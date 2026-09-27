@@ -11,6 +11,7 @@ import type { RoomSpec } from './rooms.ts';
 import { emit, runDir, type RunRequest } from './store.ts';
 import { hostClone, repoAllowed } from './pullrequest.ts';
 import { symlinkOnPath } from './safe-files.ts';
+import { validateDiskLimit } from './volume.ts';
 import { validateCredentials } from './creds/handle.ts';
 import { Broker, CredentialError, FileBackend, fileAudit } from './creds/broker.ts';
 
@@ -35,6 +36,7 @@ const exec = promisify(execFile);
 interface RequestBody {
   agent?: string; task?: unknown; files?: Record<string, string>; secrets?: string[]; expect?: unknown;
   repo?: { url?: string; pull_request?: unknown }; webhook?: { url?: string }; live?: unknown; credentials?: unknown;
+  limits?: { disk_mb?: unknown };
 }
 
 export function validateRequest(input: unknown): string | undefined {
@@ -59,6 +61,8 @@ export function validateRequest(input: unknown): string | undefined {
   if (body.live !== undefined && typeof body.live !== 'boolean') return 'live must be a boolean';
   if (body.webhook && !/^https?:\/\//.test(body.webhook.url ?? '')) return 'webhook.url must be an http(s) URL';
   for (const s of body.secrets ?? []) if (!(s in config.secrets)) return `unknown secret "${s}" (not in server secrets file)`;
+  const diskErr = validateDiskLimit(body.limits?.disk_mb, config.defaults.diskMb > 0, config.maxDiskMb);
+  if (diskErr) return diskErr;
   return validateExpect(body.expect, !!body.repo?.pull_request);
 }
 
