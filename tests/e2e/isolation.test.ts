@@ -39,3 +39,56 @@ test('isolation probes from tenant A cannot see tenant B', async () => {
   const failed = lines.filter(l => l.endsWith('FAIL'));
   assert.deepEqual(failed, [], `isolation violations:\n${failed.join('\n')}`);
 });
+
+// Checklist 2.5: two rooms at the same time (SAR_MAX_ROOMS >= 2). The victim serves
+// a marker over HTTP and proves it is reachable from inside itself (paired check);
+// the attacker, running concurrently, must reach neither the port nor the file.
+// Patterns are written as regex classes so they never match the probe's own cmdline.
+const NEIGHBOUR_PROBES = String.raw`
+check() { if eval "$2" >/dev/null 2>&1; then echo "CHECK $1 PASS"; else echo "CHECK $1 FAIL"; fi; }
+check neighbour_http_blocked   '! curl -s -m 4 http://$VICTIM_IP:8080/marker.txt'
+check neighbour_marker_hidden  '! grep -rsl "$MARKER" /workspace /artifacts /tmp /home /var /opt /proc/[0-9]*/cwd/'
+check neighbour_not_in_proc    '! grep -sl "http[.]serve[r]" /proc/[0-9]*/cmdline'
+check internet_still_works     'curl -s -m 10 -o /dev/null https://api.github.com'
+`;
+
+test('two concurrent rooms cannot see or reach each other (checklist 2.5)', { timeout: 300_000 }, async t => {
+  const { api } = await import('../lib/client.ts');
+  const health = await api('GET', '/healthz');
+  if ((health.body.max_rooms ?? 1) < 2) return t.skip('SAR_MAX_ROOMS < 2 on this server');
+  const marker = 'NEIGHBOUR_MARKER_' + Math.random().toString(36).slice(2);
+  const victim = await api('POST', '/runs', { agent: 'shell', limits: { timeout_s: 200, idle_timeout_s: 200 }, task: [
+    `echo ${marker} > /workspace/marker.txt`,
+    'cd /workspace && (python3 -m http.server 8080 >/dev/null 2>&1 &)',
+    'sleep 2; curl -s -m 3 http://127.0.0.1:8080/marker.txt | grep -q NEIGHBOUR_MARKER_ && echo SELF_OK',
+    'echo "VICTIM_IP $(hostname -i | cut -d" " -f1)"',
+    'sleep 180',
+  ].join('\n') });
+  assert.equal(victim.status, 202);
+  const vid = victim.body.id;
+  try {
+    let ip = '', selfOk = false;
+    for (let i = 0; i < 120 && !ip; i++) {
+      for (const ev of (await api('GET', `/runs/${vid}/events`)).body) {
+        if (ev.type !== 'agent.stdout') continue;
+        if (ev.data.line === 'SELF_OK') selfOk = true;
+        const m = /^VICTIM_IP (\S+)/.exec(ev.data.line);
+        if (m) ip = m[1];
+      }
+      if (!ip) await new Promise(r => setTimeout(r, 1000));
+    }
+    assert.ok(ip, 'victim never reported its IP');
+    assert.ok(selfOk, 'paired check: the victim serves the marker to itself');
+    const attacker = await runAndWait({ agent: 'shell', limits: { timeout_s: 120 },
+      task: `export MARKER='${marker}' VICTIM_IP='${ip}'\n${NEIGHBOUR_PROBES}` });
+    const lines = (await api('GET', `/runs/${attacker.id}/events`)).body
+      .filter((e: { type: string; data: { line: string } }) => e.type === 'agent.stdout' && e.data.line.startsWith('CHECK '))
+      .map((e: { data: { line: string } }) => e.data.line);
+    console.log(`victim ${ip}\n${lines.join('\n')}`);
+    assert.equal(lines.length, 4, `probes did not run: ${explain(attacker)}`);
+    assert.deepEqual(lines.filter((l: string) => l.endsWith('FAIL')), []);
+    assert.equal((await api('GET', `/runs/${vid}`)).body.state, 'RUNNING', 'the victim really ran at the same time');
+  } finally {
+    await api('POST', `/runs/${vid}/cancel`);
+  }
+});

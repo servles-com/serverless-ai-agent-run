@@ -37,7 +37,7 @@ docker build -q -t "$IMAGE" room-image
 echo "=== start candidate on 127.0.0.1:$PORT (instance $INSTANCE)"
 SAR_API_TOKEN=$TOKEN SAR_HOST=127.0.0.1 SAR_PORT=$PORT SAR_DATA_DIR=$DATA \
   SAR_ROOM_RUNTIME=${SAR_CI_RUNTIME:-runsc} SAR_ROOM_NETWORK=sar-rooms SAR_ROOM_IMAGE=$IMAGE \
-  SAR_INSTANCE=$INSTANCE SAR_SECRETS_FILE=$DATA/secrets.env SAR_MAX_ROOMS=1 \
+  SAR_INSTANCE=$INSTANCE SAR_SECRETS_FILE=$DATA/secrets.env SAR_MAX_ROOMS=2 \
   node src/server.ts > "$DATA/server.log" 2>&1 &
 SERVER_PID=$!
 for _ in $(seq 1 30); do
