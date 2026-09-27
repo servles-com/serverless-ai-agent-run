@@ -64,7 +64,7 @@ log "systemd units"
 cp /opt/sar/deploy/*.service /opt/sar/deploy/*.timer /etc/systemd/system/
 chmod +x /opt/sar/scripts/*.sh
 systemctl daemon-reload
-systemctl enable --now sar-netpolicy.service sar.service sar-dogfood.timer
+systemctl enable --now sar-netpolicy.service sar.service sar-dogfood.timer sar-timeline.timer
 systemctl restart sar.service                  # pick up new code on re-runs
 
 sleep 2

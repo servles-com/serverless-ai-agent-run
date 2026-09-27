@@ -51,6 +51,11 @@ export const config = {
   providerEnv: ['OPENROUTER_API_KEY'],
   secrets: loadSecrets(process.env.SAR_SECRETS_FILE),
 
+  // Host-side PRs: token used only by the host (never passed to rooms) and the
+  // repos it may push to ("owner/repo", comma-separated).
+  githubPushToken: process.env.SAR_GITHUB_PUSH_TOKEN ?? '',
+  prRepos: (process.env.SAR_PR_REPOS ?? '').split(',').map(s => s.trim()).filter(Boolean),
+
   // How long finished run dirs are kept for debugging.
   retentionHours: num('SAR_RETENTION_HOURS', 72),
 };

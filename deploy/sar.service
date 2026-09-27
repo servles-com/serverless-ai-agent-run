@@ -7,6 +7,8 @@ Requires=docker.service
 User=sar
 Group=sar
 EnvironmentFile=/etc/sar/sar.env
+# SAR_GITHUB_PUSH_TOKEN + SAR_PR_REPOS for host-side PRs. Host-only: never passed to rooms.
+EnvironmentFile=-/etc/sar/github-push.env
 WorkingDirectory=/opt/sar
 ExecStart=/usr/bin/node src/server.ts
 Restart=always
