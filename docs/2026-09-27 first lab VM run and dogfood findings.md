@@ -34,5 +34,5 @@ No `SILENT_FAILURE` (agent claims success with no artifacts) in this batch.
 ## Operational notes
 
 - API token: `/etc/sar/sar.env` on the VM; API only on `127.0.0.1:8787` → use `scripts/gcp-lab-vm.sh tunnel`.
-- Issue filing from dogfood is wired but inactive until `GITHUB_TOKEN` is set in `/etc/sar/secrets.env`.
+- Issue filing from dogfood is wired but inactive until `GH_TOKEN` is set in `/etc/sar/dogfood.env` (not secrets.env — rooms can request those).
 - Dogfood timer: every 3 h; reports in `/var/lib/sar/reports/`.

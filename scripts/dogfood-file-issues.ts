@@ -2,7 +2,7 @@
 // Only categories that point at *our* runtime (not at a weak free model) are filed,
 // one open issue per category (deduplicated by title).
 //
-//   node scripts/dogfood-file-issues.ts          needs `gh` authenticated (GH_TOKEN) on the host
+//   node scripts/dogfood-file-issues.ts          needs GH_TOKEN (fine-grained, Issues: write on this repo only) in /etc/sar/dogfood.env
 //   SAR_ISSUES_DRY_RUN=1 node scripts/...         print what would be filed
 import { readFileSync, existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -24,7 +24,7 @@ const byCat = new Map<string, any[]>();
 for (const r of rows) byCat.set(r.category, [...(byCat.get(r.category) ?? []), r]);
 
 if (!dry && !process.env.GH_TOKEN && !process.env.GITHUB_TOKEN) {
-  console.log(`skip: ${rows.length} watched failures, but no GITHUB_TOKEN in /etc/sar/secrets.env to file issues`);
+  console.log(`skip: ${rows.length} watched failures, but no GH_TOKEN in /etc/sar/dogfood.env to file issues`);
   process.exit(0);
 }
 const open = dry ? [] : JSON.parse(execFileSync('gh', ['issue', 'list', '-R', REPO, '--state', 'open', '--label', 'dogfood',

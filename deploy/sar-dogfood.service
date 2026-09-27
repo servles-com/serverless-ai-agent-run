@@ -6,8 +6,9 @@ After=sar.service
 Type=oneshot
 User=sar
 EnvironmentFile=/etc/sar/sar.env
-# GITHUB_TOKEN here lets `gh` file dogfood issues
-EnvironmentFile=-/etc/sar/secrets.env
+# GH_TOKEN for filing dogfood issues. Deliberately NOT in secrets.env: runs can request
+# anything from secrets.env into their room; this token must never reach an agent.
+EnvironmentFile=-/etc/sar/dogfood.env
 WorkingDirectory=/opt/sar
 ExecStart=/usr/bin/node scripts/dogfood-free-models.ts
 ExecStartPost=-/usr/bin/node scripts/dogfood-file-issues.ts
