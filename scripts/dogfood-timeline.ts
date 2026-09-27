@@ -6,7 +6,7 @@
 // Output: $SAR_DATA_DIR/reports/timeline-history.jsonl
 import { appendFileSync, mkdirSync, readFileSync, existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { runAndWait } from '../tests/lib/client.ts';
+import { runAndWait, QueueTimeoutError } from '../tests/lib/client.ts';
 
 const REPO = process.env.SAR_TIMELINE_REPO ?? 'servles-com/universe-timeline';
 const MODEL = process.env.SAR_TIMELINE_MODEL ?? 'openrouter/nvidia/nemotron-3-super-120b-a12b:free';
@@ -67,7 +67,8 @@ try {
     metadata: { track: 'timeline', issue: issue.number },
   }, TIMEOUT_S + 200) as RunResult;
 } catch (e) {
-  run = { id: '-', state: 'HARNESS_ERROR', diagnosis: { category: 'HARNESS_ERROR', summary: (e as Error).message } };
+  const cat = e instanceof QueueTimeoutError ? 'QUEUE_TIMEOUT' : 'HARNESS_ERROR';
+  run = { id: '-', state: cat, diagnosis: { category: cat, summary: (e as Error).message } };
 }
 
 const pr = run.result?.pull_request;
