@@ -134,3 +134,10 @@ test('rule: the guard and the workflows are sensitive themselves', () => {
   assert.equal(isSensitivePath('.github/workflows/ci.yml'), true);
   assert.equal(isSensitivePath('scripts/dogfood-status.sh'), false);
 });
+
+test('rule: package-lock.json does not count towards PR size', () => {
+  const lock = { path: 'package-lock.json', added: Array(5000).fill('x'), removed: [] };
+  const code = { path: 'src/a.ts', added: Array(10).fill('x'), removed: [] };
+  assert.equal(changedLines([lock, code]), 10);
+  assert.equal(sizeViolation([lock, code]), null);
+});
