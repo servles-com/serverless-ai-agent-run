@@ -1,25 +1,16 @@
 // What a finished run hands back: the artifact index, the host-side PR and the
 // `expect` contract check. Both checks run only for a run that otherwise succeeded
 // and can turn it into a FAILED verdict.
-import { readdirSync, statSync, existsSync, readFileSync } from 'node:fs';
-import { join, relative } from 'node:path';
+import { readFileSync, lstatSync, closeSync } from 'node:fs';
+import { join } from 'node:path';
+import { listFiles, openInside } from './safe-files.ts';
 import { config } from './config.ts';
 import type { AgentStats } from './adapters/index.ts';
 import { checkDeliverable, type Verdict } from './failures.ts';
 import { emit, runDir, type RunRecord, type RunRequest } from './store.ts';
 import { openPullRequest, PullRequestError } from './pullrequest.ts';
 
-export function listFiles(root: string, base = root): string[] {
-  if (!existsSync(root)) return [];
-  const out: string[] = [];
-  for (const name of readdirSync(root)) {
-    const full = join(root, name);
-    const st = statSync(full);
-    if (st.isDirectory()) out.push(...listFiles(full, base));
-    else if (st.isFile()) out.push(relative(base, full));
-  }
-  return out.sort();
-}
+export { listFiles };
 
 export async function settleDeliverables(o: {
   id: string; result: NonNullable<RunRecord['result']>; req: RunRequest; model: string;
@@ -52,8 +43,12 @@ export async function settleDeliverables(o: {
     const artDir = join(dir, 'artifacts');
     const failed = checkDeliverable(req.expect, {
       agent: req.agent ?? 'opencode', text: agentStats.finalText, pullRequest: !!result.pull_request,
-      artifacts: artifacts.map(p => ({ path: p, size: statSync(join(artDir, p)).size })),
-      parsesAsJson: p => { try { JSON.parse(readFileSync(join(artDir, p), 'utf8')); return true; } catch { return false; } },
+      artifacts: artifacts.map(p => ({ path: p, size: lstatSync(join(artDir, p)).size })),
+      parsesAsJson: p => {
+        const fd = openInside(artDir, p);
+        if (fd === undefined) return false;
+        try { JSON.parse(readFileSync(fd, 'utf8')); return true; } catch { return false; } finally { closeSync(fd); }
+      },
     }, verdict.warnings);
     if (failed) Object.assign(verdict, failed);
   }

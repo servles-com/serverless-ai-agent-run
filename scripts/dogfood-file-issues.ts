@@ -10,7 +10,7 @@ import { execFileSync } from 'node:child_process';
 import { api } from '../tests/lib/client.ts';
 
 const REPO = process.env.SAR_ISSUES_REPO ?? 'servles-com/serverless-ai-agent-run';
-const WATCH = (process.env.SAR_ISSUES_CATEGORIES ?? 'RUNTIME_BUG,SILENT_FAILURE,AGENT_NO_OUTPUT,ROOM_START_FAILED,HYDRATE_FAILED,HARNESS_ERROR,UNKNOWN').split(',');
+const WATCH = (process.env.SAR_ISSUES_CATEGORIES ?? 'RUNTIME_BUG,SILENT_FAILURE,AGENT_NO_OUTPUT,ROOM_START_FAILED,HYDRATE_FAILED,HARNESS_ERROR,QUEUE_TIMEOUT,UNKNOWN').split(',');
 const SINCE_H = Number(process.env.SAR_ISSUES_SINCE_H ?? 24);
 const dry = process.env.SAR_ISSUES_DRY_RUN === '1';
 

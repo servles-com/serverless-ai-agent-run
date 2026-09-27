@@ -10,6 +10,7 @@ import { validateExpect } from './failures.ts';
 import type { RoomSpec } from './rooms.ts';
 import { emit, runDir, type RunRequest } from './store.ts';
 import { hostClone, repoAllowed } from './pullrequest.ts';
+import { symlinkOnPath } from './safe-files.ts';
 
 const exec = promisify(execFile);
 
@@ -58,6 +59,8 @@ export async function hydrate(id: string, req: RunRequest) {
     }
   }
   for (const [p, content] of Object.entries(req.files ?? {})) {
+    const link = symlinkOnPath(ws, p);
+    if (link) throw new Error(`input file ${p}: ${link} in the workspace is a symlink; refusing to write through it`);
     const full = join(ws, p);
     mkdirSync(dirname(full), { recursive: true });
     writeFileSync(full, content);

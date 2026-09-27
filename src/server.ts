@@ -10,13 +10,14 @@
 //   POST /runs/:id/cancel
 //   GET  /healthz                    docker/runtime/image checks (no auth)
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
-import { createReadStream, existsSync, readFileSync, statSync } from 'node:fs';
-import { join, resolve, sep } from 'node:path';
+import { createReadStream, existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { timingSafeEqual } from 'node:crypto';
 import { config } from './config.ts';
 import { bus, createRun, getRun, listRuns, readEvents, runDir, TERMINAL, type RunEvent, type RunRecord } from './store.ts';
 import { cancel, enqueue, gcOldRuns, reconcileOnStartup, stats, validateRequest, listFiles } from './runner.ts';
 import { dockerHealth } from './rooms.ts';
+import { openInside } from './safe-files.ts';
 
 function send(res: ServerResponse, code: number, body: unknown) {
   res.writeHead(code, { 'content-type': 'application/json' });
@@ -131,10 +132,10 @@ addRoute('GET', '/runs/:id/debug/*', ({ res, id, rec, dir }) => {
 addRoute('GET', '/runs/:id/artifacts/*', ({ res, rest, dir }) => {
   const root = join(dir, 'artifacts');
   if (rest.length === 0) return send(res, 200, listFiles(root));
-  const file = resolve(root, decodeURIComponent(rest.join('/')));
-  if (!file.startsWith(root + sep) || !existsSync(file) || !statSync(file).isFile()) return send(res, 404, { error: 'artifact not found' });
+  const fd = openInside(root, decodeURIComponent(rest.join('/')));
+  if (fd === undefined) return send(res, 404, { error: 'artifact not found' });
   res.writeHead(200, { 'content-type': 'application/octet-stream' });
-  return void createReadStream(file).pipe(res);
+  return void createReadStream('', { fd }).pipe(res);
 });
 
 async function handle(req: IncomingMessage, res: ServerResponse) {

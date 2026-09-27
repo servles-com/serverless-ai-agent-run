@@ -2,10 +2,12 @@
 // recovery and GC. Queue: queue.ts; room inputs: run-env.ts; PR/expect: deliverables.ts.
 import { writeFileSync, readdirSync, existsSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { config } from './config.ts';
 import { adapters, emptyStats } from './adapters/index.ts';
 import { closeOpenStep } from './step-timing.ts';
-import { classify } from './failures.ts';
+import { classify, newFailFast, observeFailFast } from './failures.ts';
 import { startRoom, destroyRoom, listRoomContainers, containerName } from './rooms.ts';
 import { emit, getRun, saveRun, runDir, runsDir, TERMINAL, type RunRecord, type RunState } from './store.ts';
 import { attachRoom, isCancelRequested, release, requestOf, startQueue, type Completion } from './queue.ts';
@@ -16,6 +18,8 @@ import { scrub } from './redact.ts';
 export { enqueue, cancel, stats } from './queue.ts';
 export { validateRequest } from './run-env.ts';
 export { listFiles } from './deliverables.ts';
+
+const exec = promisify(execFile);
 
 startQueue({ execute, finish });
 
@@ -46,12 +50,22 @@ async function execute(id: string): Promise<void> {
   // --- execute
   const adapter = adapters[req.agent ?? 'opencode'];
   const agentStats = emptyStats();
+  const failFast = newFailFast(config.failFastProviderErrors);
+  const stopEarly = () => {
+    emit(id, 'run.log', { msg: `fail-fast: ${failFast.errors} provider errors in a row, stopping the room` });
+    void exec(config.docker, ['kill', containerName(id)]).catch(() => {});
+  };
   const spec = roomSpec(id, req, model, {
     onStdoutLine: line => {
       const parsed = adapter.parse(line, agentStats);
       if (parsed) emit(id, `agent.${parsed.type}`, parsed.data);
+      // Provider errors are counted from stderr only (opencode logs each one there once).
+      if (parsed?.type === 'tool' || parsed?.type === 'text' || parsed?.type === 'step_finish') observeFailFast(failFast, { progress: true });
     },
-    onStderrLine: line => { if (line.trim()) emit(id, 'room.stderr', { line: line.slice(0, 2000) }); },
+    onStderrLine: line => {
+      if (line.trim()) emit(id, 'room.stderr', { line: line.slice(0, 2000) });
+      if (observeFailFast(failFast, { stderr: line })) stopEarly();
+    },
   });
   rec.room = { container: containerName(id), runtime: config.roomRuntime || 'runc' };
   setState(rec, 'RUNNING', { model: req.agent === 'shell' ? undefined : model, limits: spec.limits });
@@ -79,7 +93,7 @@ async function execute(id: string): Promise<void> {
   const result = rec.result = { text: agentStats.finalText, artifacts, steps: agentStats.steps, tool_calls: agentStats.toolCalls,
     tool_errors: agentStats.toolErrors, tokens: agentStats.tokens,
     model_ms: agentStats.timing.modelMs, tool_ms: agentStats.timing.toolMs, open_ms: agentStats.timing.openMs, step_timings: agentStats.timing.stepTimings };
-  const verdict = classify({ agent: req.agent ?? 'opencode', room: outcome, stats: agentStats, artifacts, exportError });
+  const verdict = classify({ agent: req.agent ?? 'opencode', room: outcome, stats: agentStats, artifacts, exportError, failFast });
   await settleDeliverables({ id, result, req, model, stats: agentStats, artifacts, verdict });
   finish(rec, verdict);
 }
