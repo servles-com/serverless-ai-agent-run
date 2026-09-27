@@ -6,7 +6,7 @@ import { promisify } from 'node:util';
 import { config, providerEnvValues } from './config.ts';
 import { adapters, emptyStats } from './adapters/index.ts';
 import { closeOpenStep } from './step-timing.ts';
-import { classify, checkDeliverable, validateExpect } from './failures.ts';
+import { classify, checkDeliverable, validateExpect, newFailFast, observeFailFast } from './failures.ts';
 import { startRoom, destroyRoom, listRoomContainers, containerName, type RoomHandle } from './rooms.ts';
 import { bus, emit, getRun, saveRun, runDir, runsDir, TERMINAL, type RunRecord, type RunRequest, type RunState } from './store.ts';
 import { deliver, flush, shouldDeliver, type WebhookTarget } from './webhooks.ts';
@@ -125,6 +125,11 @@ async function execute(id: string): Promise<void> {
   setState(rec, 'RUNNING', { model: req.agent === 'shell' ? undefined : model, limits });
   console.log(`run ${id} RUNNING agent=${req.agent} ${req.agent === 'shell' ? '' : `model=${model} `}task=${JSON.stringify(req.task.slice(0, 80))}`);
 
+  const failFast = newFailFast(config.failFastProviderErrors);
+  const stopEarly = () => {
+    emit(id, 'run.log', { msg: `fail-fast: ${failFast.errors} provider errors in a row, stopping the room` });
+    void exec(config.docker, ['kill', containerName(id)]).catch(() => {});
+  };
   const room = startRoom({
     runId: id,
     workspaceDir: join(dir, 'workspace'),
@@ -135,8 +140,13 @@ async function execute(id: string): Promise<void> {
     onStdoutLine: line => {
       const parsed = adapter.parse(line, agentStats);
       if (parsed) emit(id, `agent.${parsed.type}`, parsed.data);
+      // Provider errors are counted from stderr only (opencode logs each one there once).
+      if (parsed?.type === 'tool' || parsed?.type === 'text' || parsed?.type === 'step_finish') observeFailFast(failFast, { progress: true });
     },
-    onStderrLine: line => { if (line.trim()) emit(id, 'room.stderr', { line: line.slice(0, 2000) }); },
+    onStderrLine: line => {
+      if (line.trim()) emit(id, 'room.stderr', { line: line.slice(0, 2000) });
+      if (observeFailFast(failFast, { stderr: line })) stopEarly();
+    },
   });
   active.set(id, room);
   if (cancelRequested.has(id)) room.cancel();
@@ -160,7 +170,7 @@ async function execute(id: string): Promise<void> {
   rec.result = { text: agentStats.finalText, artifacts, steps: agentStats.steps, tool_calls: agentStats.toolCalls,
     tool_errors: agentStats.toolErrors, tokens: agentStats.tokens,
     model_ms: agentStats.timing.modelMs, tool_ms: agentStats.timing.toolMs, open_ms: agentStats.timing.openMs, step_timings: agentStats.timing.stepTimings };
-  const verdict = classify({ agent: req.agent ?? 'opencode', room: outcome, stats: agentStats, artifacts, exportError });
+  const verdict = classify({ agent: req.agent ?? 'opencode', room: outcome, stats: agentStats, artifacts, exportError, failFast });
 
   // Host-side PR, only for a run that otherwise succeeded. "Nothing changed" is a
   // failure, not a quiet success — the user's worst case is an agent that did nothing.

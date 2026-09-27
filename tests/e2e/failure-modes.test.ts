@@ -36,6 +36,17 @@ test('expect: contract met -> SUCCEEDED', async () => {
   assert.equal(run.state, 'SUCCEEDED', explain(run));
 });
 
+test('fail-fast: 3 provider errors in a row -> MODEL_PROVIDER_ERROR in seconds, not at timeout', async () => {
+  const started = Date.now();
+  const err = 'level=ERROR message=\\"stream error\\" providerID=openrouter error.error.code=504';
+  const run = await runAndWait({ agent: 'shell', limits: { timeout_s: 240, idle_timeout_s: 240 },
+    task: `for i in 1 2 3; do echo "${err}" >&2; sleep 1; done; sleep 600` });
+  assert.equal(run.state, 'FAILED', explain(run));
+  assert.equal(run.diagnosis.category, 'MODEL_PROVIDER_ERROR', explain(run));
+  assert.match(run.diagnosis.summary, /Stopped early/);
+  assert.ok(Date.now() - started < 60_000, `took ${Math.round((Date.now() - started) / 1000)}s`);
+});
+
 test('crash: non-zero exit -> AGENT_CRASHED with stderr evidence', async () => {
   const run = await runAndWait({ agent: 'shell', task: 'echo "boom: something broke" >&2; exit 3' });
   assert.equal(run.state, 'FAILED', explain(run));
