@@ -110,6 +110,9 @@ OOM, таймауты, счётчики шагов/tool calls, хвост stderr
 `stderr.log` было видно, что OpenRouter каждые ~2 минуты отдавал `504 stream error`,
 opencode ретраил — и тишины никогда не было достаточно для `IDLE_STALL`. Классификатор
 дописан: таймаут без единого tool call + ошибки провайдера в логах → `MODEL_PROVIDER_ERROR`.
+А теперь и без ожидания таймаута: 3 ошибки провайдера подряд без прогресса агента
+(`SAR_FAILFAST_PROVIDER_ERRORS`, 0 — выключить) — комната останавливается сразу,
+диагноз `MODEL_*` с «Stopped early».
 
 ---
 
@@ -176,7 +179,6 @@ opencode ретраил — и тишины никогда не было дос�
    только мёржит.
 2. **Автодеплой после merge.** GitHub Actions → self-hosted runner на VM → `bootstrap`
    + `selftest.sh`; красный selftest → issue и откат.
-3. **Fail-fast на повторяющихся ошибках провайдера** — не жечь 10 минут таймаута.
 4. **LLM-прокси на хосте** — ключ провайдера уходит из комнаты; классификация
    `MODEL_*` по реальным HTTP-статусам, а не по регуляркам в логах; учёт токенов.
 5. **Квота диска для /workspace** (сейчас агент может забить диск VM — см. чеклист).
@@ -306,6 +308,14 @@ docs/                архитектура, безопасность, roadmap, 
 
 ## Claude Code Instructions
 
+- **Модели для агентов — только через LLM ladder владельца** (`ladder/free`, воркер
+  [trained-assist-llm-ladder](https://github.com/trained-assist/trained-assist-llm-ladder):
+  OpenCode Go → Zen / OpenRouter `:free` → дешёвые платные, с ротацией ключей и здоровьем
+  моделей). Токен `LLM_LADDER_TOKEN` лежит в GCP Secret Manager проекта
+  `alesa-personal-assistent` и в `/etc/sar/secrets.env` на машине. Не подключать OpenRouter
+  напрямую как дефолт: квота одного аккаунта кончается за несколько ранов. Это решение
+  настраивали несколько раз — не терять.
+
 - V0 держим минимальным. Требования — из задачи (API + вебхук, изолированные комнаты,
   диагностика падений), а не из раннего мультитенантного драфта. Тенанты, storage
   gateway, KMS и прочий access-control — **потом**, см. ROADMAP.
@@ -319,7 +329,7 @@ docs/                архитектура, безопасность, roadmap, 
 - Изменения изоляции комнаты — только с зелёным `tests/e2e/isolation.test.ts` на VM
   с `SAR_ROOM_RUNTIME=runsc`.
 - Разбор рана: `GET /runs/{id}/debug` или на VM `/var/lib/sar/runs/<id>/`.
-- Держать актуальными `docs/requirements-log.md` и `docs/security-checklist.md`.
+- Требования и статус — в GitHub issues (open/closed + комментарий с причиной). `docs/requirements-log.md` — архив, строки не добавлять. `docs/security-checklist.md` держать актуальным.
 - Флоу: feature-ветка → PR → CI зелёный → merge → `machine.sh bootstrap` → selftest.
 - Никаких облачных сервисов (GCS, Secret Manager, managed DB/queues): только машина, файлы, sqlite, systemd, docker+gVisor.
 - План CI/CD и логов: `docs/ci-cd-and-logging-development-plan.md`. Репо публичный; `main` защищён: только PR + зелёный `check`, в том числе для админов. Секреты, токены, IP машины и личные данные в репо и issues не писать.

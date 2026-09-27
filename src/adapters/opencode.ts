@@ -16,6 +16,20 @@ const SYSTEM_HINT = [
   'Nobody will answer questions: make reasonable assumptions and finish the task.',
 ].join(' ');
 
+// Models come from the owner's LLM ladder (github.com/trained-assist/trained-assist-llm-ladder):
+// OpenCode Go first, then Zen / OpenRouter :free, then cheap paid — with key rotation and
+// model health inside the ladder. Do NOT point rooms at OpenRouter directly: one account's
+// free quota is gone in a few runs (2026-09-28). The token comes from provider env
+// (LLM_LADDER_TOKEN) and is referenced, not inlined.
+const LADDER_PROVIDER = {
+  ladder: {
+    npm: '@ai-sdk/openai-compatible',
+    name: 'trained-assist LLM ladder',
+    options: { baseURL: process.env.SAR_LADDER_URL ?? 'https://llm-ladder.trainedassist.store/v1', apiKey: '{env:LLM_LADDER_TOKEN}' },
+    models: { free: { name: 'free ladder (Go → Zen/OpenRouter free → cheap paid)', tool_call: true } },
+  },
+};
+
 export const opencodeAdapter: AgentAdapter = {
   name: 'opencode',
   command: (req, model) => {
@@ -25,7 +39,7 @@ export const opencodeAdapter: AgentAdapter = {
       : ['opencode', 'run', '--pure', ...args];
   },
   env: () => ({
-    OPENCODE_CONFIG_CONTENT: JSON.stringify({ autoupdate: false, share: 'disabled' }),
+    OPENCODE_CONFIG_CONTENT: JSON.stringify({ autoupdate: false, share: 'disabled', provider: LADDER_PROVIDER }),
   }),
   parse(line, stats) {
     let ev: any;
