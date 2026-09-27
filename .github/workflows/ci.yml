@@ -15,3 +15,14 @@ jobs:
       - run: npm run typecheck
       - run: npm run test:unit
       - run: bash -n scripts/*.sh
+  guards:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: node scripts/ci/run.ts
