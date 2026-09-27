@@ -11,13 +11,30 @@ import type { RoomSpec } from './rooms.ts';
 import { emit, runDir, type RunRequest } from './store.ts';
 import { hostClone, repoAllowed } from './pullrequest.ts';
 import { symlinkOnPath } from './safe-files.ts';
+import { validateCredentials } from './creds/handle.ts';
+import { Broker, CredentialError, FileBackend, fileAudit } from './creds/broker.ts';
+
+// One operator for now (config.owner); the broker still checks every handle against it.
+let broker: Broker | undefined;
+const getBroker = () => broker ??= new Broker(new FileBackend(config.credsDir), fileAudit(config.credentialAuditFile));
+
+// Env-mode credentials of a run (level L2: the value is in the room's process env,
+// never in the request, run.json or logs; it is registered for redaction). Throws
+// CredentialError -> the run fails in PREPARING with CREDENTIAL_MISSING/REVOKED.
+export function resolveCredentialEnv(id: string, req: RunRequest): Record<string, string> {
+  if (!req.credentials?.length) return {};
+  const env = getBroker().resolveEnv({ id, owner: config.owner }, req.credentials);
+  emit(id, 'run.log', { msg: `credentials delivered as env: ${req.credentials.filter(c => c.as === 'env').map(c => `${c.ref} -> ${c.name}`).join(', ')}` });
+  return env;
+}
+export { CredentialError };
 
 const exec = promisify(execFile);
 
 // Untrusted JSON body: fields are checked here before it is treated as a RunRequest.
 interface RequestBody {
   agent?: string; task?: unknown; files?: Record<string, string>; secrets?: string[]; expect?: unknown;
-  repo?: { url?: string; pull_request?: unknown }; webhook?: { url?: string }; live?: unknown;
+  repo?: { url?: string; pull_request?: unknown }; webhook?: { url?: string }; live?: unknown; credentials?: unknown;
 }
 
 export function validateRequest(input: unknown): string | undefined {
@@ -31,6 +48,13 @@ export function validateRequest(input: unknown): string | undefined {
   if (body.repo?.pull_request) {
     if (!config.githubPushToken) return 'pull_request is not enabled on this server (no SAR_GITHUB_PUSH_TOKEN)';
     if (!repoAllowed(body.repo.url!, config.prRepos)) return `pull_request not allowed for ${body.repo.url} (allowed: ${config.prRepos.join(', ') || 'none'})`;
+  }
+  if (body.credentials !== undefined) {
+    const v = validateCredentials(body.credentials);
+    if (!v.ok) return v.error;
+    if (v.specs.some(s => s.as === 'proxy') && !config.gateway.host) {
+      return 'credentials: as "proxy" needs the host gateway, which is not enabled on this server yet (use as "env")';
+    }
   }
   if (body.live !== undefined && typeof body.live !== 'boolean') return 'live must be a boolean';
   if (body.webhook && !/^https?:\/\//.test(body.webhook.url ?? '')) return 'webhook.url must be an http(s) URL';
@@ -71,12 +95,13 @@ export async function hydrate(id: string, req: RunRequest) {
 
 // Room spec for a run: adapter command, env (provider keys only for model agents,
 // only the secrets the request named), limits with server defaults.
-export function roomSpec(id: string, req: RunRequest, model: string, io: Pick<RoomSpec, 'onStdoutLine' | 'onStderrLine'>): RoomSpec {
+export function roomSpec(id: string, req: RunRequest, model: string, io: Pick<RoomSpec, 'onStdoutLine' | 'onStderrLine'>, credEnv: Record<string, string> = {}): RoomSpec {
   const adapter = adapters[req.agent ?? 'opencode'];
   const dir = runDir(id);
   const env: Record<string, string> = { ...adapter.env(req, model) };
   if (req.agent !== 'shell') Object.assign(env, providerEnvValues());
   for (const s of req.secrets ?? []) env[s] = config.secrets[s];
+  Object.assign(env, credEnv);
   const limits = {
     timeoutS: req.limits?.timeout_s ?? config.defaults.timeoutS,
     idleTimeoutS: req.limits?.idle_timeout_s ?? config.defaults.idleTimeoutS,
