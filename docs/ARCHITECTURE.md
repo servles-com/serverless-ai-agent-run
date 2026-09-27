@@ -52,7 +52,7 @@ Target runtime: Docker/containerd + gVisor `runsc`, pending compatibility testin
 
 V0 uses a local fake object-store layout for tests.
 
-V0.5 introduces Google Cloud Storage in the same GCP region as the VM, a database for run metadata, and Secret Manager/KMS for credentials.
+Hosting constraint (2026-09-27): **one bare Linux machine, no cloud services.** Persistence stays on the machine's disk (run dirs, sqlite index); secrets stay in root-owned files; off-machine backup is a plain rsync to a second box when one exists.
 
 The VM disk is disposable cache and temporary execution storage.
 

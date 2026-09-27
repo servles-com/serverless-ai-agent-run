@@ -40,7 +40,7 @@ Gaps against the task:
 
 ## V0 launch sequence
 
-1. `scripts/gcp-lab-vm.sh create` — e2-small, Ubuntu 24.04 (temporary, Maryam's GCP credits).
+1. `scripts/gcp-lab-vm.sh create` — e2-small, Ubuntu 24.04 (temporary).
 2. `vm-bootstrap.sh` — docker, gVisor (`runsc`), node 24, room image, systemd units, network policy.
 3. Put `OPENROUTER_API_KEY` into `/etc/sar/secrets.env`.
 4. `selftest.sh` — unit + failure modes + isolation probes must pass.

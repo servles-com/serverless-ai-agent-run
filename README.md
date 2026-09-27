@@ -10,10 +10,14 @@
 
 «Serverless» — только для вызывающего. Внутри это одна VM с Docker + gVisor.
 
-> **Статус: V0, работает.** Lab VM в GCP (`sar-lab-1`), selftest зелёный, dogfood
+> **Хостинг: одна голая машина с SSH, никаких облачных сервисов.** Сейчас это временная
+> VM `sar-lab-1` (GCP используется только как «железо»; переезд — `SAR_SSH=... scripts/machine.sh bootstrap`).
+>
+> **Статус: V0, работает.** Lab VM, selftest зелёный, dogfood
 > гоняет задачи на бесплатных моделях. Один оператор (один API-токен).
 > Трекинг: [docs/requirements-log.md](docs/requirements-log.md) ·
 > безопасность: [docs/security-checklist.md](docs/security-checklist.md) ·
+> CI/CD и логи: [docs/ci-cd-and-logging-development-plan.md](docs/ci-cd-and-logging-development-plan.md) ·
 > планы: [docs/ROADMAP.md](docs/ROADMAP.md) ·
 > потребности пользователя: [docs/user-needs-discovery.md](docs/user-needs-discovery.md)
 
@@ -171,7 +175,7 @@ opencode ретраил — и тишины никогда не было дос�
    `MODEL_*` по реальным HTTP-статусам, а не по регуляркам в логах; учёт токенов.
 5. **Квота диска для /workspace** (сейчас агент может забить диск VM — см. чеклист).
 6. Продолжение сессии (`POST /runs/{id}/messages`), адаптеры Claude Code и Codex.
-7. GCS для артефактов; мультитенантность — только когда появится второй реальный
+7. Хранилище ранов на диске машины + sqlite-индекс (облаков нет); мультитенантность — только когда появится второй реальный
    пользователь.
 
 Решения, от которых сознательно отказались в V0, и почему —
@@ -217,7 +221,9 @@ GET  /healthz                     docker, runtime, образ, очередь
 ## Эксплуатация
 
 ```bash
-# VM (временная, GCP-кредиты Мариам): create | bootstrap | ssh | tunnel | delete
+# Любая машина по SSH:
+SAR_SSH=root@host bash scripts/machine.sh bootstrap | ssh <cmd> | tunnel | status | selftest
+# Временная GCP VM (SAR_SSH не задан → gcp-lab-vm.sh): create | bootstrap | ssh | tunnel | delete
 bash scripts/gcp-lab-vm.sh bootstrap          # залить текущий HEAD и (пере)развернуть
 bash scripts/gcp-lab-vm.sh tunnel             # API на localhost:8787
 bash scripts/gcp-lab-vm.sh ssh 'sudo -u sar bash /opt/sar/scripts/selftest.sh'
@@ -265,7 +271,7 @@ src/webhooks.ts      подписанные вебхуки по порядку, 
 src/adapters/        opencode (поток JSON-событий), shell (для тестов)
 src/store.ts         раны на диске
 room-image/          образ комнаты (node + opencode + git + python)
-scripts/             bootstrap, сетевая политика, selftest, dogfood, burst, status, gcp-lab-vm
+scripts/             bootstrap, сетевая политика, selftest, dogfood, burst, status, machine (SSH), gcp-lab-vm
 deploy/              systemd-юниты, пример secrets
 tests/unit           классификатор (18)
 tests/e2e            сценарии падений (13), изоляция (11 проб), живой opencode
@@ -291,5 +297,7 @@ docs/                архитектура, безопасность, roadmap, 
   с `SAR_ROOM_RUNTIME=runsc`.
 - Разбор рана: `GET /runs/{id}/debug` или на VM `/var/lib/sar/runs/<id>/`.
 - Держать актуальными `docs/requirements-log.md` и `docs/security-checklist.md`.
-- Флоу: feature-ветка → PR → CI зелёный → merge → `gcp-lab-vm.sh bootstrap` → selftest.
+- Флоу: feature-ветка → PR → CI зелёный → merge → `machine.sh bootstrap` → selftest.
+- Никаких облачных сервисов (GCS, Secret Manager, managed DB/queues): только машина, файлы, sqlite, systemd, docker+gVisor.
+- План CI/CD и логов: `docs/ci-cd-and-logging-development-plan.md`. Приватный репо на GitHub Free — branch protection недоступна, последнюю линию держит машина (CD сверяет статус коммита).
   В `main` напрямую не пушить.

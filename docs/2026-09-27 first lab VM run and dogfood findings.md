@@ -1,6 +1,6 @@
 # First lab VM run and dogfood findings — 2026-09-27
 
-Lab VM: GCP `project-e7960d87-a0b0-406b-a2f` (Maryam's credits), `sar-lab-1`,
+Lab VM: temporary cloud VM `sar-lab-1`,
 e2-small, us-central1-a, Ubuntu 24.04, docker + gVisor `runsc`. Temporary —
 delete with `scripts/gcp-lab-vm.sh delete` when moving to the permanent VM.
 
