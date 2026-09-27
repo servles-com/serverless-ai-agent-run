@@ -15,7 +15,7 @@ Scope revised 2026-09-27, see `docs/2026-09-27 draft review and V0 launch plan.m
 - [x] deterministic failure-mode + isolation suites (`scripts/selftest.sh`)
 - [x] dogfood timer on free models
 - [x] selftest green on the lab VM with `runsc` (2026-09-27, incl. live opencode)
-- [x] failure → GitHub issue automation from dogfood (needs GITHUB_TOKEN on the VM)
+- [x] failure → GitHub issue automation from dogfood (needs GH_TOKEN in /etc/sar/dogfood.env)
 - [ ] fail fast on repeated provider errors instead of retrying until timeout
 - [x] CI: typecheck + unit tests on every PR
 - [ ] self-hosted runner on the VM: selftest per PR
