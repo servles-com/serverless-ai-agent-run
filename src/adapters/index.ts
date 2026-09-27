@@ -3,6 +3,7 @@
 import type { RunRequest } from '../store.ts';
 import { newStepTimingState, type StepTimingState } from '../step-timing.ts';
 import { opencodeAdapter } from './opencode.ts';
+import type { StreamRedactor } from '../redact.ts';
 import { shellAdapter } from './shell.ts';
 
 export interface AgentStats {
@@ -16,6 +17,7 @@ export interface AgentStats {
   parsedLines: number;
   unparsedLines: number;
   timing: StepTimingState; // model wait vs tool execution, see src/step-timing.ts
+  liveParts?: Map<string, StreamRedactor>; // live text deltas: per-part redaction across chunks
 }
 
 export interface ParsedLine {
