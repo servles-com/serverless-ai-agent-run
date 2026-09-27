@@ -1,12 +1,12 @@
 // Run Manager: queue + lifecycle  hydrate -> execute -> export -> sterilize.
-import { mkdirSync, writeFileSync, readdirSync, statSync, existsSync, rmSync } from 'node:fs';
+import { mkdirSync, writeFileSync, readdirSync, statSync, existsSync, rmSync, readFileSync } from 'node:fs';
 import { join, dirname, resolve, relative, isAbsolute } from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { config, providerEnvValues } from './config.ts';
 import { adapters, emptyStats } from './adapters/index.ts';
 import { closeOpenStep } from './step-timing.ts';
-import { classify } from './failures.ts';
+import { classify, checkDeliverable, validateExpect } from './failures.ts';
 import { startRoom, destroyRoom, listRoomContainers, containerName, type RoomHandle } from './rooms.ts';
 import { bus, emit, getRun, saveRun, runDir, runsDir, TERMINAL, type RunRecord, type RunRequest, type RunState } from './store.ts';
 import { deliver, flush, shouldDeliver, type WebhookTarget } from './webhooks.ts';
@@ -42,7 +42,7 @@ export function validateRequest(body: any): string | undefined {
   }
   if (body.webhook && !/^https?:\/\//.test(body.webhook.url ?? '')) return 'webhook.url must be an http(s) URL';
   for (const s of body.secrets ?? []) if (!(s in config.secrets)) return `unknown secret "${s}" (not in server secrets file)`;
-  return undefined;
+  return validateExpect(body.expect, !!body.repo?.pull_request);
 }
 
 export function enqueue(rec: RunRecord, req: RunRequest): void {
@@ -181,6 +181,15 @@ async function execute(id: string): Promise<void> {
           ? ['The agent reported success but did not modify the repository — see its final text in result.text']
           : ['See run.log events and host-repo/ in the run dir'] };
     }
+  }
+  if (verdict.state === 'SUCCEEDED') {
+    const artDir = join(dir, 'artifacts');
+    const failed = checkDeliverable(req.expect, {
+      agent: req.agent ?? 'opencode', text: agentStats.finalText, pullRequest: !!rec.result.pull_request,
+      artifacts: artifacts.map(p => ({ path: p, size: statSync(join(artDir, p)).size })),
+      parsesAsJson: p => { try { JSON.parse(readFileSync(join(artDir, p), 'utf8')); return true; } catch { return false; } },
+    }, verdict.warnings);
+    if (failed) Object.assign(verdict, failed);
   }
   finish(rec, verdict);
 }

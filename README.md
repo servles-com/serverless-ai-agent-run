@@ -102,6 +102,8 @@ OOM, таймауты, счётчики шагов/tool calls, хвост stderr
 | `AGENT_NO_OUTPUT` / `AGENT_EMPTY_RESULT` | вышел с 0, но ничего не сделал | агент/модель |
 | `ORPHANED_BY_RESTART` | сервис перезапустился посреди рана | среда |
 | `RUNTIME_BUG` | исключение в нашем коде | среда |
+| `EXPECTATION_NOT_MET` | ран «успешен», но не сдал то, что обещано в `expect` (нет файла, пустой, битый JSON, нет PR, текст не тот) | агент/модель |
+| `NO_DELIVERABLE` | без `expect`: ни финального текста, ни непустого артефакта, ни PR | агент/модель |
 | `SILENT_FAILURE` (только dogfood) | «SUCCEEDED», но ни одного артефакта | самое опасное |
 
 Пример, как это уже сработало: в первом dogfood 3 рана упали как `TIMEOUT`. В
@@ -212,11 +214,15 @@ GET  /healthz                     docker, runtime, образ, очередь
   "repo": { "url": "https://github.com/org/repo", "ref": "main" },
   "secrets": ["GITHUB_TOKEN"],
   "webhook": { "url": "https://you.example/hook", "secret": "hmac-key", "agent_events": false },
+  "expect": { "artifacts": ["calc.py"], "text": "ok" },
   "limits": { "timeout_s": 900, "idle_timeout_s": 240, "memory_mb": 1024, "cpus": 1, "pids": 512 }
 }
 ```
 
-Обязателен только `task`. `secrets` — имена из серверного `/etc/sar/secrets.env`;
+Обязателен только `task`. `expect` — контракт результата: `artifacts` (пути/глобы в
+`/artifacts`, файл должен быть непустым), `json` (артефакты, которые должны парситься),
+`text` (`true` или регэксп для финального ответа), `non_empty`, `github_pr`. Не выполнен →
+`FAILED` / `EXPECTATION_NOT_MET` со списком невыполненного, а не тихий `SUCCEEDED`. `secrets` — имена из серверного `/etc/sar/secrets.env`;
 в комнату попадают только запрошенные. Вебхук: заголовок
 `X-SAR-Signature: sha256=HMAC(secret, body)`, последнее событие — `run.completed`.
 
