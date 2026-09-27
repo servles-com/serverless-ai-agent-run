@@ -27,7 +27,7 @@
 - [реализовано] L1 CI-гарды на PR (C2): падение числа тестов, удаление проб изоляции, `.only`/`.skip`, «фикс = тест» (метка `no-test-needed`), чувствительные файлы (`security-reviewed`), размер PR > 600 строк — `scripts/ci/`, issue #18
 - [в работе] Креды без облака: ZeroCreds (сбор, write-only) → OpenBao на машине → брокер SAR → доставка через прокси; GitHub App вместо PAT; BYO vault (docs/credentials-and-secret-storage-design.md) → issues K1–K8
 - [в работе] План CI/CD-гарда и логов (docs/ci-cd-and-logging-development-plan.md) → issues C1–C7, G1–G10
-- [в работе] 18 ресёрчей по 6 сценариям (claude/codex/opencode) → issues с меткой research
+- [реализовано] Ресёрч по 6 сценариям (24 плана) сведён в итоговые планы #75 #78 #79 #81 #82 #83 (метка plan:final) — 2026-09-27
 - [в работе] Сбор потребностей пользователя (docs/user-needs-discovery.md) — первое интервью 2026-09-27
 - [планируется] Контракт результата `expect` + EXPECTATION_NOT_MET — худший провал для юзера: «ничего не сделал молча»
 - [планируется] Мультипользовательский режим в первый месяц: ключи на юзера, owner рана, квоты, публичный HTTPS, фронтенд
