@@ -119,9 +119,11 @@ test('webhook agent_events "coalesced": ≤ 1 agent delivery per 2 s, nothing lo
     assert.ok(batches.length >= 2 && batches.length <= maxBatches, `batches: ${batches.length}, max ${maxBatches}`);
     const covered = batches.reduce((n, e) => n + e.data.count, 0);
     assert.equal(covered, 40, 'every agent event is counted in some batch');
-    const times = batches.map(e => e.received_at as number);
+    // Send time on the server, not arrival: delivery is serialized, so arrival jitters.
+    // The last batch may be flushed early by the EXPORTING lifecycle event.
+    const times = batches.map(e => Date.parse(e.data.flushed_at));
     for (let i = 1; i < times.length - 1; i++) {
-      assert.ok(times[i] - times[i - 1] >= 1800, `batches ${i - 1}→${i} only ${times[i] - times[i - 1]} ms apart`);
+      assert.ok(times[i] - times[i - 1] >= 1990, `batches ${i - 1}→${i} only ${times[i] - times[i - 1]} ms apart`);
     }
     assert.equal(types.at(-1), 'run.completed');
     const seqs: number[] = hook.events.map(e => e.seq);

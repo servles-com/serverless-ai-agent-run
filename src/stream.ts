@@ -208,6 +208,7 @@ export class Coalescer {
     const lastEv = this.buf[this.buf.length - 1];
     this.buf = [];
     this.lastSent = this.now();
-    this.send({ seq: lastEv.seq, ts: lastEv.ts, run_id: lastEv.run_id, type: 'agent.coalesced', data: { ...batch } });
+    this.send({ seq: lastEv.seq, ts: lastEv.ts, run_id: lastEv.run_id, type: 'agent.coalesced',
+      data: { ...batch, flushed_at: new Date(this.lastSent).toISOString() } });
   }
 }

@@ -41,6 +41,7 @@ test('coalescer: first event goes out at once, a burst becomes one batch per int
     assert.deepEqual([covered[0], covered.at(-1)], [1, 30], 'every event is covered, none lost');
     assert.equal(h.sent[2].ev.type, 'agent.coalesced');
     assert.equal(h.sent[2].ev.seq, 30, 'batch carries the seq of its last event');
+    assert.equal(h.sent[1].ev.data.flushed_at, new Date(2000).toISOString(), 'send time is stamped');
   } finally { h.done(); }
 });
 

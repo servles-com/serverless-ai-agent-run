@@ -41,7 +41,7 @@ export async function webhookReceiver(secret: string) {
       const body = Buffer.concat(chunks).toString();
       const want = 'sha256=' + createHmac('sha256', secret).update(body).digest('hex');
       if (req.headers['x-sar-signature'] !== want) badSignatures++;
-      events.push({ ...JSON.parse(body), received_at: Date.now() });
+      events.push(JSON.parse(body));
       res.writeHead(204).end();
     });
   });
