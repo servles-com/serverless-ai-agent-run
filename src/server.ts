@@ -156,7 +156,8 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
     const rest = match(r.path, parts);
     if (rest) return r.handler({ req, res, url, rest, id: id!, rec: rec!, dir: id === undefined ? '' : runDir(id) });
   }
-  send(res, 404, { error: 'not found' });
+  // Other methods on /runs answered "run not found" before the table; kept as is.
+  send(res, 404, { error: parts[0] === 'runs' && parts.length === 1 ? 'run not found' : 'not found' });
 }
 
 async function main() {
