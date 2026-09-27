@@ -206,6 +206,8 @@ GET  /runs/{id}/debug             всё для разбора падения о
 GET  /runs/{id}/artifacts         список
 GET  /runs/{id}/artifacts/{path}  скачать
 POST /runs/{id}/cancel
+POST /batches                     N задач → N ранов, не больше concurrency одновременно → 202 {id}
+GET  /batches[/{id}[/report]]     сводка пачки / отчёт markdown; POST /batches/{id}/cancel
 GET  /healthz                     docker, runtime, образ, очередь
 ```
 
@@ -222,6 +224,11 @@ GET  /healthz                     docker, runtime, образ, очередь
   "limits": { "timeout_s": 900, "idle_timeout_s": 240, "memory_mb": 1024, "cpus": 1, "pids": 512 }
 }
 ```
+
+Пачка: `{"run": {шаблон запроса, в task можно {{var}}}, "items": [{"id", "vars", "task"?, "files"?, "model"?, "expect"?}], "concurrency": 2}`.
+Каждый элемент — обычный ран (свой `/debug`, `expect`); раны создаются, когда у пачки есть слот, и
+после рестарта сервиса пачка досабмичивает оставшиеся. Итог: `SUCCEEDED` только если успешны все,
+иначе `PARTIAL`/`FAILED`/`CANCELLED`; `GET /batches/{id}/report` — одна таблица на всю пачку.
 
 Обязателен только `task`. `expect` — контракт результата: `artifacts` (пути/глобы в
 `/artifacts`, файл должен быть непустым), `json` (артефакты, которые должны парситься),
