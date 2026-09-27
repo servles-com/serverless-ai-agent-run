@@ -58,8 +58,12 @@ export function hasLabel(labels: string[], name: string): boolean {
   return labels.some(l => l.trim().toLowerCase() === name);
 }
 
+// Generated files are not reviewed line by line, so they don't count towards size.
+export const GENERATED_FILES = ['package-lock.json'];
+
 export function changedLines(changes: FileChange[]): number {
-  return changes.reduce((n, c) => n + c.added.length + c.removed.length, 0);
+  return changes.filter(c => !GENERATED_FILES.some(g => c.path === g || c.path.endsWith('/' + g)))
+    .reduce((n, c) => n + c.added.length + c.removed.length, 0);
 }
 
 // A test is a top-level `test(` / `it(` declaration; `.only`/`.skip` still count,
