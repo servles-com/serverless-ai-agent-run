@@ -1,5 +1,5 @@
 import { readFileSync, existsSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 import { setSecrets } from './redact.ts';
 
 function num(name: string, def: number): number {
@@ -65,8 +65,19 @@ export const config = {
   githubPushToken: process.env.SAR_GITHUB_PUSH_TOKEN ?? '',
   prRepos: (process.env.SAR_PR_REPOS ?? '').split(',').map(s => s.trim()).filter(Boolean),
 
+  // Credential references and the host gateway (K9 #92). Not wired into runs yet:
+  // see docs/host-gateway-and-credential-refs-design.md. One operator for now,
+  // so every run belongs to SAR_OWNER.
+  owner: process.env.SAR_OWNER ?? 'operator',
+  credsDir: resolve(process.env.SAR_CREDS_DIR ?? join(process.env.SAR_DATA_DIR ?? 'runtime-data', 'creds')),
+  credentialAuditFile: resolve(process.env.SAR_CREDENTIAL_AUDIT ?? join(process.env.SAR_DATA_DIR ?? 'runtime-data', 'credential-access.jsonl')),
+  // Empty host = gateway off. On the machine: the sar0 bridge address.
+  gateway: { host: process.env.SAR_GATEWAY_HOST ?? '', port: num('SAR_GATEWAY_PORT', 8788) },
+
   // How long finished run dirs are kept for debugging.
   retentionHours: num('SAR_RETENTION_HOURS', 72),
+  // SSE keep-alive comment interval for /runs/:id/stream (src/stream.ts).
+  streamHeartbeatS: num('SAR_STREAM_HEARTBEAT_S', 15),
 
   maxDiskMb: num('SAR_MAX_DISK_MB', 8192),
   volumeHelper: process.env.SAR_VOLUME_HELPER ?? '/usr/local/sbin/sar-run-volume',
