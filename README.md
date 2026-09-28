@@ -1,26 +1,26 @@
 # serverless-ai-agent-run
 
-Запускает AI-агента (сейчас OpenCode; потом Claude Code, Codex, свои агенты) как
-**фоновую задачу за HTTP API — по ощущениям как Cloudflare Worker**. Отправляешь
-`POST /runs` с задачей и входными файлами/репо, сразу получаешь `run_id`, прогресс
-приходит на твой вебхук, результат и файлы забираешь по API. Каждый запуск идёт в
-свежем изолированном контейнере (**Operating Room**, «операционная»), который
-уничтожается после работы. Любое падение заканчивается машиночитаемым диагнозом:
-*почему* упало, с доказательствами и подсказкой.
+Запускает AI-агента как **фоновую задачу за HTTP API — по ощущениям как Cloudflare
+Worker**. Отправляешь `POST /runs` с задачей (и файлами/репо), сразу получаешь `run_id`,
+прогресс приходит на твой вебхук, результат забираешь по API. Любое падение
+заканчивается машиночитаемым диагнозом: *почему* упало, с доказательствами и подсказкой.
 
-«Serverless» — только для вызывающего. Внутри это одна VM с Docker + gVisor.
+**С 2026-09-28 SAR — тонкий прокси.** Сам ран выполняет
+[trained-assist-agent](https://github.com/trained-assist/trained-assist-agent) на той же
+машине (`POST /web/run-bearer`, ответ потоком SSE); изоляция — его slots + ACL профиля,
+движок и модель выбирает профиль (`SAR_AGENT_PROFILE`). Свои Docker/gVisor-комнаты
+**на паузе**: как были устроены и как вернуть — [docs/docker-gvisor-pause.md](docs/docker-gvisor-pause.md).
+SAR держит контракт: API, вебхуки с HMAC, диагноз, стриминг, пачки, CLI.
 
 > **North Star:** [docs/north-star-user-scenario.md](docs/north-star-user-scenario.md) · путь: [docs/north-star-roadmap.md](docs/north-star-roadmap.md) — агенты пачками по API на своей машине,
 > каждый в своей изоляции; GitHub как полноценный житель; креды без LLM; результат всегда PR, файл или явная ошибка.
 >
-> **Хостинг: одна голая машина с SSH, никаких облачных сервисов.** Сейчас это временная
-> VM `sar-lab-1` (GCP используется только как «железо»; переезд — `SAR_SSH=... scripts/machine.sh bootstrap`).
+> **Хостинг: одна машина, никаких облачных сервисов.** SAR стоит рядом с trained-assist-agent
+> на основной VM (systemd `sar`, `deploy/sar.service`, конфиг `/opt/sar/.env`).
 >
-> **Статус: V0, работает.** Lab VM, selftest зелёный, dogfood
-> гоняет задачи на бесплатных моделях. Один оператор (один API-токен).
-> Трекинг: [docs/requirements-log.md](docs/requirements-log.md) ·
-> безопасность: [docs/security-checklist.md](docs/security-checklist.md) ·
-> креды: [docs/credentials-and-secret-storage-design.md](docs/credentials-and-secret-storage-design.md) ·
+> **Статус: фаза 1 миграции** — `POST /runs`, `GET /runs/{id}`, вебхуки, события/стрим, пачки.
+> Фаза 2: артефакты (файлы от агента), host-side PR, транскрипт из сессии агента.
+> Безопасность: [docs/security-checklist.md](docs/security-checklist.md) ·
 > CI/CD и логи: [docs/ci-cd-and-logging-development-plan.md](docs/ci-cd-and-logging-development-plan.md) ·
 > планы: [docs/ROADMAP.md](docs/ROADMAP.md) ·
 > потребности пользователя: [docs/user-needs-discovery.md](docs/user-needs-discovery.md)
@@ -30,31 +30,27 @@
 ## Главная идея
 
 **Среда хороша ровно настолько, насколько хорошо она ловит и объясняет свои падения.**
-Бесплатные модели падают постоянно: rate limit, 504 от провайдера, зависания,
-циклы, «готово!» без результата. V0 построен не чтобы это скрыть, а чтобы каждое
-такое падение попало в понятную категорию — и чтобы новые, ещё непонятые падения
-всплывали сами.
+Агенты падают постоянно: rate limit, 504 от провайдера, зависания, «готово!» без
+результата, рестарт соседнего сервиса. SAR построен не чтобы это скрыть, а чтобы каждое
+такое падение попало в понятную категорию.
 
 ---
 
 ## Как проходит один запуск
 
 ```text
-POST /runs ──► валидация ──► QUEUED ──► очередь (SAR_MAX_ROOMS, сейчас 1)
-                                            │
-                                   PREPARING│ hydrate: клон репо (токен в заголовке, не в URL),
-                                            │ входные файлы → runs/<id>/workspace
+POST /runs ──► валидация (то, что бэкенд не умеет, — сразу 400) ──► QUEUED
+                                            │ очередь (SAR_MAX_ROOMS одновременно)
+                                   PREPARING│ task + входные файлы + repo → один текст задачи
+                                            │ runs/<id>/agent/request.json
                                             ▼
-                                    RUNNING │ docker run --runtime runsc (gVisor)
-                                            │   non-root, cap-drop ALL, лимиты mem/cpu/pids,
-                                            │   /workspace и /artifacts смонтированы,
-                                            │   своя сеть: интернет да, хост/metadata/LAN нет
-                                            │ stdout агента (JSON-события opencode) → events.jsonl
-                                            │ сторожа: общий таймаут, idle-таймаут (молчит N сек)
-                                            ▼
-                                  EXPORTING │ индекс /artifacts
-                                            │ docker inspect (exit code, OOMKilled) → room/inspect.json
-                                            │ docker rm -f  (комната уничтожена)
+                                    RUNNING │ POST {SAR_AGENT_URL}/web/run-bearer
+                                            │   Authorization: Bearer SAR_AGENT_SECRET
+                                            │   {username: SAR_AGENT_PROFILE, task, requestId: run_id}
+                                            │ SSE: session | progress | chunk | done | error (+ ping)
+                                            │   progress → agent.tool, chunk → agent.text
+                                            │ сторожа: общий таймаут, idle (нет progress/chunk N сек)
+                                            │   → обрыв + POST /web/stop-bearer по session id
                                             ▼
                          классификатор ──► SUCCEEDED | FAILED | TIMED_OUT | CANCELLED
                                             + diagnosis {category, summary, evidence, hints}
@@ -62,133 +58,61 @@ POST /runs ──► валидация ──► QUEUED ──► очеред�
                                   run.completed → вебхук, журнал, /runs/<id>
 ```
 
-Каждое событие по пути (`run.state`, `agent.tool`, `agent.text`, `room.stderr`, …)
-пишется в `events.jsonl` и, если задан вебхук, отправляется на него — по порядку,
-с HMAC-подписью. Агентные события (каждый tool call) шлются только с
-`agent_events: true`, чтобы не заваливать вебхук.
+`result.text` — последний блок ответа агента. Поля запроса, которые бэкенд принимает, но
+не может применить (`model`, `secrets`, `limits.memory_mb/cpus/pids`), не ломают ран, а
+попадают в `warnings`. `repo.pull_request`, `credentials`, `expect.artifacts/json` сейчас —
+400 при создании (артефактов у бэкенда пока нет), а не `FAILED` через десять минут.
+
+Каждое событие по пути (`run.state`, `run.log`, `agent.text`, `agent.tool`, …) пишется в
+`events.jsonl` и, если задан вебхук, отправляется на него — по порядку, с HMAC-подписью.
+Агентные события шлются только с `agent_events: true`.
 
 ### Что лежит на диске по каждому запуску
 
 ```text
 /var/lib/sar/runs/<run_id>/
-  run.json            состояние, запрос, результат, диагноз
+  run.json            состояние, запрос, результат, диагноз, agent_backend {profile, session_id, …}
   diagnosis.json      только при неуспехе
   events.jsonl        всё, что происходило, построчно
-  workspace/          /workspace комнаты (входные файлы, клон репо, что наделал агент)
-  artifacts/          /artifacts комнаты — результат
-  room/stdout.log     сырой вывод агента
-  room/stderr.log     сырые логи агента (там видно ошибки провайдера)
-  room/docker-args.json  точная команда docker run
-  room/inspect.json   docker inspect после завершения (exit code, OOM)
+  agent/request.json  что ушло в trained-assist-agent (без авторизации)
+  agent/stream.log    сырой SSE-поток ответа (без ping)
+  artifacts/          пусто до фазы 2
 ```
 
 Хранится 72 часа (`SAR_RETENTION_HOURS`), потом удаляется. Всё — обычные файлы:
-разбирать падение можно `cat`/`jq` или отдать папку другому агенту.
+разбирать падение можно `cat`/`jq` или отдать папку другому агенту. Полная история
+сессии агента — у trained-assist-agent по `agent_backend.session_id`.
 
 ### Классификация падений
 
-[src/failures.ts](src/failures.ts) — чистая функция от собранных фактов (exit code,
-OOM, таймауты, счётчики шагов/tool calls, хвост stderr, ошибки агента).
+[src/failures.ts](src/failures.ts) — чистая функция от того, что увидел прокси
+(HTTP-статус, обрыв соединения, SSE-события, сторожа).
 
 | category | что значит | чья вина |
 |---|---|---|
-| `ROOM_START_FAILED` | docker/gVisor не смог запустить комнату | среда |
-| `HYDRATE_FAILED` | не склонировался репо / не записались файлы | вход/среда |
-| `MODEL_RATE_LIMITED` `MODEL_NOT_FOUND` `MODEL_AUTH_FAILED` `MODEL_CONTEXT_OVERFLOW` `MODEL_PROVIDER_ERROR` | ошибка провайдера модели | провайдер |
-| `TIMEOUT` | превышен `timeout_s` при реальной работе агента | агент/задача |
-| `IDLE_STALL` | агент молчит `idle_timeout_s` — завис вызов модели или интерактивная команда | агент |
-| `OOM_KILLED` | упёрся в `memory_mb` | агент/лимиты |
-| `AGENT_CRASHED` / `AGENT_BINARY_MISSING` | процесс агента упал / его нет в образе | агент/образ |
-| `AGENT_NO_OUTPUT` / `AGENT_EMPTY_RESULT` | вышел с 0, но ничего не сделал | агент/модель |
-| `ORPHANED_BY_RESTART` | сервис перезапустился посреди рана | среда |
+| `AGENT_AUTH_FAILED` | trained-assist-agent ответил 401/403: `SAR_AGENT_SECRET` ≠ его `WEB_VERIFY_SECRET`/`AGENT_SECRET` | конфиг |
+| `AGENT_REJECTED` | 4xx от агента (неверный профиль, дубликат `requestId` → 409) | вход/конфиг |
+| `AGENT_UNAVAILABLE` | агент не отвечает или 5xx до начала рана | среда |
+| `AGENT_STREAM_LOST` | поток оборвался посреди рана или закрылся без `done` (обычно рестарт агента) | среда |
+| `MODEL_RATE_LIMITED` `MODEL_NOT_FOUND` `MODEL_AUTH_FAILED` `MODEL_CONTEXT_OVERFLOW` `MODEL_PROVIDER_ERROR` | агент вернул `error`, похожий на ошибку провайдера | провайдер |
+| `AGENT_CRASHED` | агент вернул любую другую ошибку | агент |
+| `TIMEOUT` | превышен `timeout_s` | агент/задача |
+| `IDLE_STALL` | ни `progress`, ни `chunk` за `idle_timeout_s` (ping не считается) | агент |
+| `AGENT_EMPTY_RESULT` | `done` без ответа | агент/модель |
+| `ORPHANED_BY_RESTART` | SAR перезапустился посреди рана | среда |
 | `RUNTIME_BUG` | исключение в нашем коде | среда |
-| `EXPECTATION_NOT_MET` | ран «успешен», но не сдал то, что обещано в `expect` (нет файла, пустой, битый JSON, нет PR, текст не тот) | агент/модель |
-| `NO_DELIVERABLE` | без `expect`: ни финального текста, ни непустого артефакта, ни PR | агент/модель |
-| `SILENT_FAILURE` (только dogfood) | «SUCCEEDED», но ни текста, ни артефакта, ни PR — значит, проверка `NO_DELIVERABLE` в рантайме что-то пропустила | самое опасное |
-| `HARNESS_ERROR` (только dogfood) | сам харнесс потерял ран: API недоступен дольше 90 с (обычно рестарт `sar`); summary с причиной (`ECONNREFUSED`…), `run_id` сохраняется | харнесс/среда |
-
-Пример, как это уже сработало: в первом dogfood 3 рана упали как `TIMEOUT`. В
-`stderr.log` было видно, что OpenRouter каждые ~2 минуты отдавал `504 stream error`,
-opencode ретраил — и тишины никогда не было достаточно для `IDLE_STALL`. Классификатор
-дописан: таймаут без единого tool call + ошибки провайдера в логах → `MODEL_PROVIDER_ERROR`.
-А теперь и без ожидания таймаута: 3 ошибки провайдера подряд без прогресса агента
-(`SAR_FAILFAST_PROVIDER_ERRORS`, 0 — выключить) — комната останавливается сразу,
-диагноз `MODEL_*` с «Stopped early».
+| `EXPECTATION_NOT_MET` | ран «успешен», но не сдал обещанное в `expect` (текст не тот) | агент/модель |
+| `NO_DELIVERABLE` | без `expect`: нет финального текста | агент/модель |
+| `SILENT_FAILURE`, `HARNESS_ERROR` (только dogfood) | см. `scripts/dogfood-lib.ts` | харнесс |
 
 ---
 
 ## Откуда сейчас берутся задачи
 
-Внешних пользователей пока нет. Задачи идут из трёх источников:
-
-1. **Selftest** (`scripts/selftest.sh`) — детерминированные сценарии через агент
-   `shell` (задача = shell-скрипт). Каждый вызывает ровно одну поломку: краш,
-   таймаут, зависание, OOM, fork-бомба, отсутствующий бинарник, отмена, вебхук,
-   плюс 11 проб изоляции изнутри комнаты. Это «должно работать всегда»; запускается
-   руками после каждого деплоя (`SAR_LIVE=1` — ещё один живой прогон opencode).
-2. **Dogfood** (`scripts/dogfood-free-models.ts`, systemd-таймер) — реальные задачи
-   для opencode из [tests/dogfood/tasks.json](tests/dogfood/tasks.json) на бесплатных
-   моделях OpenRouter. Сейчас 10 задач: записать файл, написать и запустить скрипт,
-   починить баг, склонировать репо и описать, JSON-трансформация, отчёт об окружении,
-   и 4 «ловушки»: интерактивный `npm init`, огромный вывод в shell, расплывчатая
-   задача «Make it better.» (провокация на `SILENT_FAILURE`), сетевой запрос.
-   - Обычный режим: раз в 3 часа все задачи × 2 модели (≈40 мин).
-   - **Burst-режим** (включён 2026-09-27 19:20 UTC до 23:20 UTC): раз в 5 минут 2
-     случайные пары (модель, задача), таймаут 240 с. Включается/выключается
-     `scripts/dogfood-burst.sh 5min 4h 2` / `… off`, выключается сам.
-3. **Ручные запуски** через API (curl через SSH-туннель).
-
-Чтобы добавить новую задачу для dogfood — дописать объект в `tests/dogfood/tasks.json`
-(`name`, `task`, опционально `files`, `repo`). Хорошие задачи — те, на которых
-агент *интересно* падает.
-
----
-
-## Как система развивается сама
-
-```text
- ┌────────────── dogfood (таймер) ──────────────┐
- │  задачи × бесплатные модели → POST /runs      │
- └──────────────────────┬────────────────────────┘
-                        ▼
-      runs/<id>/*  +  reports/history.jsonl (строка на ран: модель, задача, категория)
-                        ▼
-      dogfood-file-issues.ts (после каждого тика)
-        категории «виновата среда»: SILENT_FAILURE, RUNTIME_BUG, AGENT_NO_OUTPUT,
-        ROOM_START_FAILED, HYDRATE_FAILED, HARNESS_ERROR
-        → одна GitHub issue на категорию (метка `dogfood`), с /debug-бандлом рана;
-          если открытая issue по категории уже есть — не дублирует
-                        ▼
-      [сейчас: человек / Claude-сессия]  разбирает issue → фикс + тест → PR
-                        ▼
-      CI (typecheck + unit) зелёный → merge → scripts/gcp-lab-vm.sh bootstrap
-                        ▼
-      selftest на VM → следующий тик dogfood проверяет, что падение ушло
-```
-
-**Что уже автоматически:** генерация нагрузки, сбор истории, классификация,
-заведение issue, CI на PR.
-
-**Что пока руками:** починка по issue, деплой на VM после merge, запуск selftest
-после деплоя.
-
-**Следующие шаги, чтобы замкнуть петлю полностью** (в порядке ценности):
-
-1. **Самопочинка.** Issue с меткой `dogfood` подхватывает отдельная opencode-сессия
-   через Session Manager (`POST localhost:3000/api/sessions/start`, агент `opencode`):
-   читает /debug-бандл, добавляет категорию/тест в `failures.ts`, делает PR. Человек
-   только мёржит.
-2. **Автодеплой после merge.** GitHub Actions → self-hosted runner на VM → `bootstrap`
-   + `selftest.sh`; красный selftest → issue и откат.
-4. **LLM-прокси на хосте** — ключ провайдера уходит из комнаты; классификация
-   `MODEL_*` по реальным HTTP-статусам, а не по регуляркам в логах; учёт токенов.
-5. **Квота диска для /workspace** (сейчас агент может забить диск VM — см. чеклист).
-6. Продолжение сессии (`POST /runs/{id}/messages`), адаптеры Claude Code и Codex.
-7. Хранилище ранов на диске машины + sqlite-индекс (облаков нет); мультитенантность — только когда появится второй реальный
-   пользователь.
-
-Решения, от которых сознательно отказались в V0, и почему —
-[docs/2026-09-27 draft review and V0 launch plan.md](docs/2026-09-27%20draft%20review%20and%20V0%20launch%20plan.md).
+1. **Клиенты по API** — pr-auto-fix и ручные запуски (`sar run …`, curl).
+2. **Dogfood** (`scripts/dogfood-free-models.ts`, `tests/dogfood/tasks.json`) — **пока не
+   совместим с прокси**: задачи ждут файлы в `/artifacts` (`expect.artifacts` → 400).
+   Вернётся с артефактами в фазе 2 или после переписывания задач на `expect.text`.
 
 ---
 
@@ -209,20 +133,20 @@ GET  /runs/{id}/artifacts/{path}  скачать
 POST /runs/{id}/cancel
 POST /batches                     N задач → N ранов, не больше concurrency одновременно → 202 {id}
 GET  /batches[/{id}[/report]]     сводка пачки / отчёт markdown; POST /batches/{id}/cancel
-GET  /healthz                     docker, runtime, образ, очередь
+GET  /healthz                     доступен ли trained-assist-agent, очередь
 ```
 
 ```json
 {
   "agent": "opencode",
-  "task": "Fix the failing test in calc.py and put the fixed file in /artifacts",
+  "task": "Fix the failing test in calc.py and reply with the fixed file",
   "model": "openrouter/nvidia/nemotron-3-super-120b-a12b:free",
   "files": { "calc.py": "..." },
   "repo": { "url": "https://github.com/org/repo", "ref": "main" },
   "secrets": ["GITHUB_TOKEN"],
   "webhook": { "url": "https://you.example/hook", "secret": "hmac-key", "agent_events": false },
-  "expect": { "artifacts": ["calc.py"], "text": "ok" },
-  "limits": { "timeout_s": 900, "idle_timeout_s": 240, "memory_mb": 1024, "cpus": 1, "pids": 512 }
+  "expect": { "text": "ok" },
+  "limits": { "timeout_s": 900, "idle_timeout_s": 300 }
 }
 ```
 
@@ -231,11 +155,11 @@ GET  /healthz                     docker, runtime, образ, очередь
 после рестарта сервиса пачка досабмичивает оставшиеся. Итог: `SUCCEEDED` только если успешны все,
 иначе `PARTIAL`/`FAILED`/`CANCELLED`; `GET /batches/{id}/report` — одна таблица на всю пачку.
 
-Обязателен только `task`. `expect` — контракт результата: `artifacts` (пути/глобы в
-`/artifacts`, файл должен быть непустым), `json` (артефакты, которые должны парситься),
-`text` (`true` или регэксп для финального ответа), `non_empty`, `github_pr`. Не выполнен →
-`FAILED` / `EXPECTATION_NOT_MET` со списком невыполненного, а не тихий `SUCCEEDED`. `secrets` — имена из серверного `/etc/sar/secrets.env`;
-в комнату попадают только запрошенные. Вебхук: заголовок
+Обязателен только `task`. `model` и `secrets` принимаются, но не применяются (движок, модель и
+креды — у профиля trained-assist; на ране будет `warnings`). `expect` — контракт результата:
+`text` (`true` или регэксп для финального ответа), `non_empty`; `artifacts`/`json`/`github_pr`
+вернутся в фазе 2 (сейчас 400). Не выполнен → `FAILED` / `EXPECTATION_NOT_MET` со списком
+невыполненного, а не тихий `SUCCEEDED`. Вебхук: заголовок
 `X-SAR-Signature: sha256=HMAC(secret, body)`, последнее событие — `run.completed`.
 `webhook.agent_events: "coalesced"` — агентные события пачкой `agent.coalesced` не чаще раза в 2 с
 (`count`, `counts`, `last_text`, `last_tool`, до 50 последних событий).
@@ -244,14 +168,12 @@ GET  /healthz                     docker, runtime, образ, очередь
 только на чтение и только этого рана: `events`, `stream`, `transcript`, `artifacts` (403 на всё остальное,
 в том числе на другой ран). Хранится только sha256, живёт до удаления рана. Для `EventSource` без заголовков —
 `?access_token=<stream_token>` (мастер-ключ так не принимается). Секреты вычищены до fan-out (`store.emit`).
-По умолчанию построчно: текст и tool call видны, когда opencode их завершил. С `"live": true` (opencode,
-фаза 2, #108) в комнате работает обёртка `src/adapters/opencode-live.mjs`: `opencode serve` + `run --attach`,
-поток событий сервера внутри комнаты → `agent.text.delta` (не чаще 5/с на часть), `agent.tool.start` сразу при
-запуске команды, `agent.tool.output` (вывод по мере выполнения). Образ, `rooms.ts` и сеть не меняются.
+Гранулярность — как у trained-assist-agent: `agent.tool` на каждую метку прогресса, `agent.text` на каждый
+блок ответа. `"live": true` принимается, но дельт текста сейчас нет (были у opencode в комнате, см. пауза).
 
 Эталонный потребитель: `scripts/telegram-live.ts <run_id>` (env `SAR_STREAM_TOKEN`, `TELEGRAM_BOT_TOKEN`,
 `TELEGRAM_CHAT_ID`) — одно Telegram-сообщение, обновляется вживую (не чаще раза в 2 с), после рестарта
-продолжает с `Last-Event-ID` и правит то же сообщение; e2e против поддельного Telegram API.
+продолжает с `Last-Event-ID` и правит то же сообщение.
 
 ---
 
@@ -261,12 +183,12 @@ GET  /healthz                     docker, runtime, образ, очередь
 напрямую; `npm link` ставит команду `sar`). В `src/` не лезет — только публичный API.
 
 ```bash
-export SAR_URL=http://127.0.0.1:8787   # по умолчанию; к VM — через `gcp-lab-vm.sh tunnel`
+export SAR_URL=http://127.0.0.1:8787   # по умолчанию; снаружи — через nginx `/sar/`
 export SAR_TOKEN=...                   # API-токен (SAR_API_TOKEN тоже подхватывается)
 
-sar run --task "Fix calc.py and put it in /artifacts" --file calc.py \
-        --expect-artifact calc.py --follow        # события по SSE, в конце итог и диагноз
-sar run --task "..." --repo https://github.com/org/repo@main --model openrouter/... --timeout 600
+sar run --task "Fix calc.py and reply with the fixed file" --file calc.py \
+        --follow                                  # события по SSE, в конце итог и диагноз
+sar run --task "..." --repo https://github.com/org/repo@main --timeout 600
 sar status <id> [--json]
 sar logs <id> [--follow]
 sar artifacts <id>                                # список
@@ -275,58 +197,63 @@ sar artifacts <id> --get calc.py [--out file|-]   # скачать (по умо�
 
 - `sar run` без `--follow` печатает только `run_id` (удобно в скриптах); с `--follow` события
   идут в stderr, итог (`state`, `category`, `why`, `hint`, результат) — в stdout.
-- `--file PATH[=NAME]` — входной файл (текст) в `/workspace/NAME`; `--expect-artifact` — повторяемый,
-  превращается в `expect.artifacts`.
+- `--file PATH[=NAME]` — входной файл (текст), уходит агенту внутри текста задачи; `--expect-artifact`
+  (→ `expect.artifacts`) до фазы 2 отклоняется сервером с 400.
 - Коды выхода: `0` — ок / ран `SUCCEEDED`, `1` — ошибка API или ран не успешен, `2` — неверные аргументы.
 - `sar cred put|request` — **пока заглушка**: печатает «не реализовано», ждёт хендлов кредов (#92)
   и API-форм ZeroCreds (Zerocreds-com/zerocreds-server#63).
 
-Тесты: `tests/unit/cli-args.test.ts` (разбор аргументов, сборка запроса, SSE-парсер, вывод) и
-`tests/e2e/cli.test.ts` — **требует docker и образ комнаты**, гоняется против запущенного сервера
-как остальные e2e (`SAR_INSECURE_DEV=1 npm start`, потом `node --test tests/e2e/cli.test.ts`).
-На Docker Desktop `SAR_DATA_DIR` должен лежать в расшаренной папке (не `/tmp`), иначе bind-mount
-`resolv.conf` не монтируется и ран падает `ROOM_START_FAILED`. В `selftest.sh` на VM не входит.
+Тесты: `tests/unit/cli-args.test.ts` (разбор аргументов, сборка запроса, SSE-парсер, вывод).
 
 ---
 
 ## Эксплуатация
 
+SAR стоит на машине trained-assist-agent и ходит к нему по `127.0.0.1`.
+
 ```bash
-# Любая машина по SSH:
-SAR_SSH=root@host bash scripts/machine.sh bootstrap | ssh <cmd> | tunnel | status | selftest
-# Временная GCP VM (SAR_SSH не задан → gcp-lab-vm.sh): create | bootstrap | ssh | tunnel | delete
-bash scripts/gcp-lab-vm.sh bootstrap          # залить текущий HEAD и (пере)развернуть
-bash scripts/gcp-lab-vm.sh tunnel             # API на localhost:8787
-bash scripts/gcp-lab-vm.sh ssh 'sudo -u sar bash /opt/sar/scripts/selftest.sh'
-bash scripts/gcp-lab-vm.sh ssh 'sudo -u sar bash /opt/sar/scripts/dogfood-status.sh 4'
-bash scripts/gcp-lab-vm.sh ssh 'journalctl -u sar -f'     # строка на старт/финиш каждого рана
-bash scripts/gcp-lab-vm.sh ssh 'sudo bash /opt/sar/scripts/dogfood-burst.sh 5min 4h 2'
+# Один раз (root):
+useradd --system --home /var/lib/sar sar
+git clone https://github.com/servles-com/serverless-ai-agent-run /opt/sar && cd /opt/sar && npm ci --include=dev
+cp .env.example .env && chmod 600 .env && chown sar:sar .env   # SAR_API_TOKEN, SAR_AGENT_SECRET, SAR_AGENT_PROFILE
+cp deploy/sar.service /etc/systemd/system/ && systemctl daemon-reload && systemctl enable --now sar
+
+# Обновление после merge в main:
+cd /opt/sar && git pull --ff-only && npm ci --include=dev && systemctl restart sar
+
+curl -s localhost:8787/healthz                 # ok=true, если trained-assist-agent отвечает на /health
+journalctl -u sar -f                           # строка на старт/финиш каждого рана
 ```
 
-Где что на VM:
+`SAR_AGENT_SECRET` = `WEB_VERIFY_SECRET` trained-assist-agent (или его `AGENT_SECRET`, если
+первый не задан). Профиль `SAR_AGENT_PROFILE` (по умолчанию `sar-proxy`) — отдельный
+профиль trained-assist под раны SAR: его движок, модель и креды применяются ко всем ранам.
+
+Снаружи — через nginx trained-assist (долгие раны держат SSE):
+
+```nginx
+location /sar/ {
+    proxy_pass http://127.0.0.1:8787/;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_buffering off;          # /runs/{id}/stream и events?follow=1
+    proxy_read_timeout 600s;
+}
+```
 
 | что | где |
 |---|---|
 | код | `/opt/sar` |
-| конфиг, API-токен | `/etc/sar/sar.env` |
-| секреты для ранов (OpenRouter, GitHub) | `/etc/sar/secrets.env` |
-| токен для заведения dogfood-issue (ранам недоступен) | `/etc/sar/dogfood.env` |
+| конфиг, API-токен, секрет агента | `/opt/sar/.env` |
 | раны | `/var/lib/sar/runs/` |
-| история и отчёты dogfood | `/var/lib/sar/reports/` |
-| сервисы | `sar`, `sar-netpolicy`, `sar-dogfood.timer` |
-
-Новая VM с нуля: Ubuntu 24.04 →
-`sudo SAR_LOCAL_SRC=<checkout> bash scripts/vm-bootstrap.sh` (ставит docker, gVisor,
-node 24, собирает образ комнаты, systemd), затем ключ OpenRouter в `secrets.env`.
+| сервис | `sar` (`deploy/sar.service`) |
 
 ### Локальная разработка
 
 ```bash
 npm install --include=dev
-npm run typecheck && npm run test:unit
-docker build -t sar-room-opencode room-image && docker network create sar-rooms
-SAR_INSECURE_DEV=1 OPENROUTER_API_KEY=... npm start       # локально runc вместо gVisor
-npm run test:e2e
+npm run typecheck && npm run lint && npm run test:unit    # тест прокси поднимает поддельный trained-assist-agent
+SAR_INSECURE_DEV=1 SAR_AGENT_URL=http://127.0.0.1:8080 SAR_AGENT_SECRET=... npm start
 ```
 
 ---
@@ -335,50 +262,44 @@ npm run test:e2e
 
 ```text
 src/server.ts        HTTP API
-src/runner.ts        очередь, жизненный цикл, восстановление после рестарта, GC
-src/rooms.ts         контейнер: gVisor, лимиты, таймауты, уничтожение
-src/failures.ts      классификатор падений
+src/runner.ts        жизненный цикл рана, восстановление после рестарта, GC
+src/queue.ts         очередь и отмена
+src/agent-proxy.ts   SAR-запрос → trained-assist-agent /web/run-bearer (SSE), стоп, health, валидация
+src/failures.ts      классификатор падений, контракт `expect`
 src/webhooks.ts      подписанные вебхуки по порядку, с ретраями
-src/adapters/        opencode (поток JSON-событий), shell (для тестов)
+src/stream.ts        SSE-стрим, транскрипт, stream_token
+src/batches.ts       пачки
 src/store.ts         раны на диске
-src/creds/           хендлы кредов, файловый бэкенд, брокер с аудитом (ещё не подключено к рану)
+src/creds/           хендлы кредов, файловый бэкенд, брокер с аудитом (не подключено к ранам)
 cli/sar.ts           CLI `sar`: run / status / logs / artifacts (клиент API)
-room-image/          образ комнаты (node + opencode + git + python)
-scripts/             bootstrap, сетевая политика, selftest, dogfood, burst, status, machine (SSH), gcp-lab-vm
-deploy/              systemd-юниты, пример secrets
-tests/unit           классификатор (18), разбор аргументов CLI
-tests/e2e            сценарии падений (13), изоляция (11 проб), живой opencode, CLI
-tests/dogfood        задачи для dogfood
-docs/                архитектура, безопасность, roadmap, лог требований, ревью, находки
+scripts/             dogfood, telegram-live (эталонный потребитель стрима), CI-гарды
+deploy/              systemd-юниты
+tests/unit           классификатор, прокси против поддельного агента, стрим, пачки, CLI
+docs/                архитектура, безопасность, roadmap, пауза Docker/gVisor
 ```
 
 ---
 
 ## Claude Code Instructions
 
-- **Модели для агентов — только через LLM ladder владельца** (`ladder/free`, воркер
-  [trained-assist-llm-ladder](https://github.com/trained-assist/trained-assist-llm-ladder):
-  OpenCode Go → Zen / OpenRouter `:free` → дешёвые платные, с ротацией ключей и здоровьем
-  моделей). Токен `LLM_LADDER_TOKEN` лежит в GCP Secret Manager проекта
-  `alesa-personal-assistent` и в `/etc/sar/secrets.env` на машине. Не подключать OpenRouter
-  напрямую как дефолт: квота одного аккаунта кончается за несколько ранов. Это решение
-  настраивали несколько раз — не терять.
-
-- V0 держим минимальным. Требования — из задачи (API + вебхук, изолированные комнаты,
-  диагностика падений), а не из раннего мультитенантного драфта. Тенанты, storage
-  gateway, KMS и прочий access-control — **потом**, см. ROADMAP.
+- **SAR — прокси к trained-assist-agent.** Исполнение, изоляция, модели и креды — на его
+  стороне (профиль `SAR_AGENT_PROFILE`). Не тащить обратно в SAR запуск агентов и Docker без
+  решения владельца; как вернуть комнаты — `docs/docker-gvisor-pause.md`.
+- **Модели — только через LLM ladder владельца** (`trained-assist-llm-ladder`), теперь это
+  настройка профиля trained-assist, а не SAR. Не подключать OpenRouter напрямую как дефолт.
+- Контракт API не ломать: то, что бэкенд не умеет, — 400 при создании рана с понятной
+  причиной, то, что принято, но не применено, — `warnings` на ране.
+- Требования — из задачи (API + вебхук + диагностика падений), а не из раннего
+  мультитенантного драфта. Тенанты и прочий access-control — **потом**, см. ROADMAP.
 - Node ≥ 23.6 исполняет `.ts` напрямую — без сборки. Только erasable TypeScript
   (без enum, без parameter properties). Без runtime-зависимостей.
 - Каждое новое наблюдённое падение → категория в `src/failures.ts` + unit-тест в
-  `tests/unit/failures.test.ts`; если воспроизводится shell-агентом — e2e-кейс в
-  `tests/e2e/failure-modes.test.ts`.
-- Каждая проба «X недоступен» должна иметь парную «Y доступен» — иначе мёртвая сеть
-  делает все проверки изоляции зелёными.
-- Изменения изоляции комнаты — только с зелёным `tests/e2e/isolation.test.ts` на VM
-  с `SAR_ROOM_RUNTIME=runsc`.
-- Разбор рана: `GET /runs/{id}/debug` или на VM `/var/lib/sar/runs/<id>/`.
+  `tests/unit/failures.test.ts`; если воспроизводится поддельным агентом — кейс в
+  `tests/unit/agent-proxy.test.ts`.
+- Разбор рана: `GET /runs/{id}/debug` или на машине `/var/lib/sar/runs/<id>/`; дальше —
+  сессия `agent_backend.session_id` у trained-assist-agent.
 - Требования и статус — в GitHub issues (open/closed + комментарий с причиной). `docs/requirements-log.md` — архив, строки не добавлять. `docs/security-checklist.md` держать актуальным.
-- Флоу: feature-ветка → PR → CI зелёный → merge → `machine.sh bootstrap` → selftest.
-- Никаких облачных сервисов (GCS, Secret Manager, managed DB/queues): только машина, файлы, sqlite, systemd, docker+gVisor.
+- Флоу: feature-ветка → PR → CI зелёный → merge → `git pull` + `systemctl restart sar` на машине.
+- Никаких облачных сервисов (GCS, Secret Manager, managed DB/queues): только машина, файлы, sqlite, systemd.
 - План CI/CD и логов: `docs/ci-cd-and-logging-development-plan.md`. Репо публичный; `main` защищён: только PR + зелёный `check`, в том числе для админов. Секреты, токены, IP машины и личные данные в репо и issues не писать.
   В `main` напрямую не пушить.

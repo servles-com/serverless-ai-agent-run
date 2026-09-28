@@ -1,18 +1,26 @@
+# SAR API proxy in front of trained-assist-agent (same machine).
+# Install: useradd --system --home /var/lib/sar sar; cp deploy/sar.service /etc/systemd/system/;
+#          cp .env.example /opt/sar/.env (fill in, chmod 600, chown sar); systemctl enable --now sar
 [Unit]
-Description=serverless-ai-agent-run execution API
-After=docker.service network-online.target
-Requires=docker.service
+Description=Serverless AI Agent Run (API proxy to trained-assist-agent)
+After=network-online.target assist-agent.service
+Wants=network-online.target
 
 [Service]
+Type=simple
 User=sar
 Group=sar
-EnvironmentFile=/etc/sar/sar.env
-# SAR_GITHUB_PUSH_TOKEN + SAR_PR_REPOS for host-side PRs. Host-only: never passed to rooms.
-EnvironmentFile=-/etc/sar/github-push.env
 WorkingDirectory=/opt/sar
+EnvironmentFile=/opt/sar/.env
 ExecStart=/usr/bin/node src/server.ts
-Restart=always
-RestartSec=3
+Restart=on-failure
+RestartSec=5
+# Run dirs live in /var/lib/sar (SAR_DATA_DIR); everything else is read-only.
+StateDirectory=sar
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
 
 [Install]
 WantedBy=multi-user.target
