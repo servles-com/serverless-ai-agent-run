@@ -53,7 +53,7 @@ before(async () => {
   await new Promise<void>(r => agent.listen(0, '127.0.0.1', r));
   cfg = { agentUrl: `http://127.0.0.1:${(agent.address() as AddressInfo).port}`, agentSecret: SECRET, profile: 'sar-proxy' };
 });
-after(() => agent.close());
+after(() => { agent.closeAllConnections(); agent.close(); });
 
 const req = (task: string, over: Partial<RunRequest> = {}): RunRequest => ({ agent: 'opencode', task, ...over });
 const run = (task: string, o: { timeoutS?: number; idleTimeoutS?: number } = {}, c = cfg) => {
@@ -146,7 +146,7 @@ test('SAR API end to end through the proxy', async (t) => {
   const sar: ChildProcess = spawn(process.execPath, ['src/server.ts'], { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env,
     SAR_PORT: String(port), SAR_API_TOKEN: 'api-token', SAR_DATA_DIR: mkdtempSync(join(tmpdir(), 'sar-proxy-')),
     SAR_AGENT_URL: cfg.agentUrl, SAR_AGENT_SECRET: SECRET } });
-  t.after(() => { sar.kill(); hookSrv.close(); });
+  t.after(() => { sar.kill(); hookSrv.closeAllConnections(); hookSrv.close(); });
   const base = `http://127.0.0.1:${port}`;
   const api = async (method: string, path: string, b?: unknown) => {
     const res = await fetch(base + path, { method, headers: { authorization: 'Bearer api-token', 'content-type': 'application/json' }, body: b ? JSON.stringify(b) : undefined });
