@@ -1,10 +1,12 @@
-// Run queue: admission (FIFO up to SAR_MAX_ROOMS), rooms in flight, cancel
+// Run queue: admission (FIFO up to SAR_MAX_ROOMS), runs in flight, cancel
 // requests and per-run in-memory state (full request incl. secrets, webhook
 // target). What a run does lives in runner.ts, plugged in via startQueue().
 import { config } from './config.ts';
-import type { RoomHandle } from './rooms.ts';
 import { bus, emit, getRun, TERMINAL, type Diagnosis, type RunRecord, type RunRequest, type RunState } from './store.ts';
 import { deliver, flush, shouldDeliver, type WebhookTarget } from './webhooks.ts';
+
+// What the queue needs from a run in flight (the agent-proxy handle).
+export interface RunHandle { cancel: () => void }
 
 export interface Completion { state: RunState; diagnosis?: Diagnosis; warnings: string[] }
 
@@ -14,7 +16,7 @@ export interface Lifecycle {
 }
 
 const queue: string[] = [];
-const active = new Map<string, RoomHandle | null>();
+const active = new Map<string, RunHandle | null>();
 const cancelRequested = new Set<string>();
 // Webhook secrets live only in memory (run.json has them redacted).
 const webhooks = new Map<string, WebhookTarget>();
@@ -61,10 +63,10 @@ export function stats() {
 export const requestOf = (id: string): RunRequest | undefined => requests.get(id);
 export const isCancelRequested = (id: string): boolean => cancelRequested.has(id);
 
-// The room is known only once started; a cancel that arrived while preparing applies now.
-export function attachRoom(id: string, room: RoomHandle): void {
-  active.set(id, room);
-  if (cancelRequested.has(id)) room.cancel();
+// The handle is known only once started; a cancel that arrived while preparing applies now.
+export function attachHandle(id: string, h: RunHandle): void {
+  active.set(id, h);
+  if (cancelRequested.has(id)) h.cancel();
 }
 
 // Drop per-run in-memory state once the run is terminal (webhook target after the last delivery).

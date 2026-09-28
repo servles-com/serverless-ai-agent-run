@@ -8,12 +8,9 @@ import tseslint from 'typescript-eslint';
 const anyBaseline = [
   'scripts/dogfood-file-issues.ts',
   'scripts/dogfood-free-models.ts',
-  'src/adapters/opencode.ts',
-  'src/rooms.ts',
   'src/runner.ts',
   'src/server.ts',
   'src/webhooks.ts',
-  'tests/e2e/redaction.test.ts',
   'tests/lib/client.ts',
 ];
 
@@ -28,8 +25,4 @@ export default tseslint.config(
     },
   },
   { files: anyBaseline, rules: { '@typescript-eslint/no-explicit-any': 'off' } },
-  // Plain JS that runs inside the room under node (src/adapters/opencode-live.mjs).
-  { files: ['**/*.mjs'], languageOptions: { globals: Object.fromEntries(
-    ['process', 'console', 'Buffer', 'fetch', 'AbortController', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval']
-      .map(g => [g, 'readonly'])) } },
 );

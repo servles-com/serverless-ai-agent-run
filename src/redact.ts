@@ -1,8 +1,7 @@
 // Secret redaction (plan task G3).
 //
-// Every value the server knows to be a secret — provider keys and anything a run
-// may request from the secret store (`config.secrets`) — is replaced with `***`
-// before it can reach events.jsonl, the room's stdout/stderr logs or a webhook.
+// Every value the server knows to be a secret (the agent secret, the API token) is
+// replaced with `***` before it can reach events.jsonl, the agent stream log or a webhook.
 //
 // Values are registered once at startup (config.ts) so no call site has to thread
 // them through. Blank and very short values are ignored: replacing a 1-char

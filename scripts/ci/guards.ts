@@ -27,6 +27,7 @@ export const MAX_CHANGED_LINES = 600;
 // Path suffixes that require the security-reviewed label. Suffix match keeps this
 // stable across renames of parent directories.
 export const SENSITIVE_SUFFIXES = [
+  'src/agent-proxy.ts',
   'src/rooms.ts',
   'scripts/room-network-policy.sh',
   'room-image/Dockerfile',

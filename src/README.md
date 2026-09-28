@@ -1,25 +1,10 @@
 # src
 
-Implementation intentionally starts small.
-
-Suggested first vertical slice:
-
 ```text
-src/
-  api/
-  runs/
-  rooms/
-  adapters/
-    opencode/
-  storage/
+API (server.ts) -> Run Manager (runner.ts, queue.ts) -> Agent Proxy (agent-proxy.ts) -> trained-assist-agent
 ```
 
-Do not create all modules up front unless the first implementation needs them.
-
-The important boundary is:
-
-```text
-API -> Run Manager -> Room Manager -> Agent Adapter
-```
-
-The Room Manager owns isolation and lifecycle. The Agent Adapter owns only how a specific agent runtime is invoked inside an already prepared room.
+The Run Manager owns the run lifecycle, events, webhooks and the verdict
+(failures.ts). The Agent Proxy owns only how a run is handed to trained-assist-agent
+and how its SSE answer is read back. Local Docker/gVisor rooms are paused:
+docs/docker-gvisor-pause.md.

@@ -34,11 +34,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: shellcheck --version && shellcheck scripts/*.sh
-  hadolint:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: docker run --rm -v "$PWD:/w" -w /w hadolint/hadolint:v2.12.0 hadolint room-image/Dockerfile
   gitleaks:
     runs-on: ubuntu-latest
     steps:

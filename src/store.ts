@@ -2,9 +2,8 @@
 //
 //   runs/<run_id>/run.json          current record (state, request, diagnosis)
 //   runs/<run_id>/events.jsonl      every lifecycle + agent event, append-only
-//   runs/<run_id>/workspace/        mounted at /workspace in the room
-//   runs/<run_id>/artifacts/        mounted at /artifacts in the room
-//   runs/<run_id>/room/             stdout.log, stderr.log, inspect.json
+//   runs/<run_id>/agent/            request.json (what went to trained-assist-agent), stream.log (raw SSE)
+//   runs/<run_id>/artifacts/        result files (empty until the backend returns files, phase 2)
 //
 // Plain files on purpose: the whole point of V0 is that a broken run can be
 // debugged with `ls`, `cat` and `jq` — or by another agent.
@@ -15,7 +14,6 @@ import { EventEmitter } from 'node:events';
 import { config } from './config.ts';
 import { scrub } from './redact.ts';
 import type { Expect } from './failures.ts';
-import type { CredentialSpec } from './creds/handle.ts';
 
 export type RunState =
   | 'QUEUED' | 'PREPARING' | 'RUNNING' | 'EXPORTING'
@@ -24,18 +22,17 @@ export type RunState =
 export const TERMINAL: RunState[] = ['SUCCEEDED', 'FAILED', 'CANCELLED', 'TIMED_OUT'];
 
 export interface RunRequest {
-  agent: 'opencode' | 'shell';
+  agent: 'opencode';            // the trained-assist profile picks the real engine
   task: string;
-  model?: string;
+  model?: string;                // accepted, not applied: the trained-assist profile decides
   files?: Record<string, string>;
   // pull_request: the host (never the room) commits the agent's edits and opens a PR.
   repo?: { url: string; ref?: string; pull_request?: { base?: string; title?: string; body?: string; branch?: string } };
-  secrets?: string[];
+  secrets?: string[];            // accepted, not forwarded (warning on the run)
   // agent_events: true = every agent event; 'coalesced' = ≤ 1 batch / 2 s (src/stream.ts).
   webhook?: { url: string; secret?: string; agent_events?: boolean | 'coalesced' };
   expect?: Expect;               // result contract, see checkDeliverable() in failures.ts
-  credentials?: CredentialSpec[]; // references only (cred:<name>), resolved by the broker; see src/creds/
-  live?: boolean;                // opencode: stream text deltas and running tools (agent.text.delta, agent.tool.start/output)
+  live?: boolean;                // accepted for compatibility; text arrives in answer blocks
   limits?: { timeout_s?: number; idle_timeout_s?: number; memory_mb?: number; cpus?: number; pids?: number };
   metadata?: Record<string, unknown>;
 }
@@ -56,7 +53,7 @@ export interface RunRecord {
   updated_at: string;
   started_at?: string;
   finished_at?: string;
-  room?: { container: string; runtime: string; exit_code?: number | null; oom_killed?: boolean };
+  agent_backend?: { url: string; profile: string; session_id?: string; http_status?: number; duration_ms?: number };
   result?: {
     pull_request?: { url: string; number: number; branch: string; files_changed: number; commit: string };
     text?: string; artifacts: string[]; steps: number; tool_calls: number; tool_errors: number; tokens?: number;
@@ -93,7 +90,7 @@ export function newRunId(): string {
 export function createRun(req: RunRequest): RunRecord {
   const id = newRunId();
   const dir = runDir(id);
-  for (const d of ['workspace', 'artifacts', 'room']) mkdirSync(join(dir, d), { recursive: true });
+  for (const d of ['agent', 'artifacts']) mkdirSync(join(dir, d), { recursive: true });
   const now = new Date().toISOString();
   const rec: RunRecord = { id, state: 'QUEUED', request: req, created_at: now, updated_at: now };
   saveRun(rec);

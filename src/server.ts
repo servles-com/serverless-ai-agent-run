@@ -12,7 +12,7 @@
 //   POST /runs/:id/cancel
 //   POST /batches                    N tasks -> N runs, at most `concurrency` at a time (src/batches.ts)
 //   GET  /batches[/:id[/report]]     summary / markdown report; POST /batches/:id/cancel
-//   GET  /healthz                    docker/runtime/image checks (no auth)
+//   GET  /healthz                    is trained-assist-agent reachable (no auth)
 //
 // Auth: the master API token, or a run's stream_token (read-only, that run only).
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
@@ -22,7 +22,7 @@ import { timingSafeEqual } from 'node:crypto';
 import { config } from './config.ts';
 import { bus, createRun, getRun, listRuns, readEvents, runDir, TERMINAL, type RunEvent, type RunRecord } from './store.ts';
 import { cancel, enqueue, gcOldRuns, reconcileOnStartup, stats, validateRequest, listFiles } from './runner.ts';
-import { dockerHealth } from './rooms.ts';
+import { agentHealth } from './agent-proxy.ts';
 import { openInside } from './safe-files.ts';
 import { batchSummary, cancelBatch, createBatch, expandBatch, getBatch, listBatches, reportMarkdown, resumeBatches } from './batches.ts';
 import { isStreamToken, issueStreamToken, presentedToken, renderTranscript, streamRun, streamTokenAllows } from './stream.ts';
@@ -139,12 +139,9 @@ addRoute('GET', '/runs/:id/debug/*', ({ res, id, rec, dir }) => {
     run: rec,
     diagnosis: rec.diagnosis ?? null,
     counts: events.reduce<Record<string, number>>((a, e) => (a[e.type] = (a[e.type] ?? 0) + 1, a), {}),
-    last_events: events.filter(e => e.type !== 'room.stderr').slice(-40),
-    stderr_tail: tail(join(dir, 'room', 'stderr.log'), 60),
-    stdout_tail: tail(join(dir, 'room', 'stdout.log'), 20),
-    docker: existsSync(join(dir, 'room', 'docker-args.json')) ? JSON.parse(readFileSync(join(dir, 'room', 'docker-args.json'), 'utf8')) : null,
-    room_state: existsSync(join(dir, 'room', 'inspect.json')) ? JSON.parse(readFileSync(join(dir, 'room', 'inspect.json'), 'utf8')).State : null,
-    workspace_files: listFiles(join(dir, 'workspace')).filter(f => !f.startsWith('.git/')).slice(0, 200),
+    last_events: events.slice(-40),
+    agent_request: existsSync(join(dir, 'agent', 'request.json')) ? JSON.parse(readFileSync(join(dir, 'agent', 'request.json'), 'utf8')) : null,
+    agent_stream_tail: tail(join(dir, 'agent', 'stream.log'), 40),
     run_dir: dir,
   });
 });
@@ -192,8 +189,8 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
   const parts = url.pathname.split('/').filter(Boolean);
 
   if (req.method === 'GET' && url.pathname === '/healthz') {
-    const docker = await dockerHealth();
-    return send(res, docker.ok ? 200 : 503, { ok: docker.ok, docker, runtime: config.roomRuntime || 'runc', image: config.roomImage, ...stats() });
+    const agent = await agentHealth();
+    return send(res, agent.ok ? 200 : 503, { ok: agent.ok, backend: 'trained-assist-agent', agent, ...stats() });
   }
   const token = presentedToken(req, url);
   if (isStreamToken(token)) {
@@ -230,7 +227,7 @@ async function main() {
   createServer((req, res) => {
     handle(req, res).catch(e => send(res, e.status ?? 500, { error: e.message }));
   }).listen(config.port, config.host, () => {
-    console.log(`serverless-ai-agent-run listening on http://${config.host}:${config.port} data=${config.dataDir} runtime=${config.roomRuntime || 'runc'}`);
+    console.log(`serverless-ai-agent-run listening on http://${config.host}:${config.port} data=${config.dataDir} agent=${config.agentUrl} profile=${config.agentProfile}`);
   });
 }
 

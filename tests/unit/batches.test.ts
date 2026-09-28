@@ -4,7 +4,7 @@ import { expandBatch, summarize, reportMarkdown, itemView, type ItemView } from 
 import type { RunRecord } from '../../src/store.ts';
 
 test('expandBatch: template + items + vars -> validated run requests', () => {
-  const x = expandBatch({ run: { agent: 'shell', task: 'echo {{name}} > /artifacts/{{name}}.txt', expect: { artifacts: ['*.txt'] } },
+  const x = expandBatch({ run: { agent: 'opencode', task: 'echo {{name}} > /artifacts/{{name}}.txt', expect: { artifacts: ['*.txt'] } },
     items: [{ id: 'a', vars: { name: 'alpha' } }, { vars: { name: 'beta' }, files: { 'in.txt': 'x' } }, { task: 'echo custom' }], concurrency: 2 }, 3);
   assert.ok(!('error' in x), JSON.stringify(x));
   if ('error' in x) return;
@@ -24,10 +24,10 @@ test('expandBatch: everything is validated before a batch exists', () => {
   assert.match(err({ items: Array(201).fill({ task: 'x' }) }), /at most 200/);
   assert.match(err({ items: [{ task: 'x' }], concurrency: 4 }), /1\.\.3/);
   assert.match(err({ items: [{ id: 'a', task: 'x' }, { id: 'a', task: 'y' }] }), /unique/);
-  assert.match(err({ run: { agent: 'shell' }, items: [{ id: 'k' }] }), /items\[0\] \(k\): task/);
-  assert.match(err({ run: { agent: 'shell' }, items: [{ task: 'x', files: { '../x': 'y' } }] }), /unsafe file path/);
+  assert.match(err({ run: { agent: 'opencode' }, items: [{ id: 'k' }] }), /items\[0\] \(k\): task/);
+  assert.match(err({ run: { agent: 'opencode' }, items: [{ task: 'x', files: { '../x': 'y' } }] }), /unsafe file path/);
   assert.match(err({ run: { agent: 'nope' }, items: [{ task: 'x' }] }), /unknown agent/);
-  const d = expandBatch({ run: { agent: 'shell' }, items: [{ task: 'x' }] }, 1);
+  const d = expandBatch({ run: { agent: 'opencode' }, items: [{ task: 'x' }] }, 1);
   assert.ok(!('error' in d) && d.concurrency === 1, 'default concurrency is capped by SAR_MAX_ROOMS');
 });
 
@@ -45,7 +45,7 @@ test('summarize: SUCCEEDED only if all succeed; partial is PARTIAL, not success'
 });
 
 test('itemView: pending, unknown run, finished run', () => {
-  const req = { agent: 'shell' as const, task: 't' };
+  const req = { agent: 'opencode' as const, task: 't' };
   assert.equal(itemView({ id: 'a', request: req }, undefined).state, 'PENDING');
   assert.equal(itemView({ id: 'a', request: req, run_id: 'run_x' }, undefined).state, 'UNKNOWN');
   const rec = { id: 'run_x', state: 'SUCCEEDED', request: req, created_at: '', updated_at: '',

@@ -2,22 +2,10 @@
 // *why* a run failed, so every non-success ends with exactly one category,
 // the evidence behind it and a hint what to try next.
 //
-// Pure function over facts collected by the runner -> easy to unit test and
-// to extend whenever dogfooding finds an "UNKNOWN" failure.
-import type { RoomOutcome } from './rooms.ts';
-import type { AgentStats } from './adapters/index.ts';
+// Pure function over what the agent proxy observed (src/agent-proxy.ts) -> easy
+// to unit test and to extend whenever a new kind of failure shows up.
+import type { AgentOutcome } from './agent-proxy.ts';
 import type { Diagnosis, RunState } from './store.ts';
-
-export interface Facts {
-  agent: string;
-  room: RoomOutcome;
-  stats: AgentStats;
-  artifacts: string[];
-  exportError?: string;
-  // Gateway refused a credential during the run (src/gateway.ts takeErrors).
-  credentialErrors?: { code: 'CREDENTIAL_MISSING' | 'CREDENTIAL_REVOKED'; ref: string }[];
-  failFast?: FailFastState;    // set when the runner stopped the room early (SB3)
-}
 
 export interface Verdict { state: RunState; diagnosis?: Diagnosis; warnings: string[] }
 
@@ -33,166 +21,62 @@ export function providerErrorCategory(line: string): string | undefined {
   return MODEL_ERROR_PATTERNS.find(([re]) => re.test(line))?.[1];
 }
 
-// --- Fail-fast on provider errors (SB3). Free models often fail for minutes while
-// the agent CLI keeps retrying; without this the run burns its whole timeout.
-// N provider-error lines in a row, with no agent progress in between, trip it and
-// the runner stops the room. Progress (a tool call or model output) resets the count.
-
-export interface FailFastState {
-  threshold: number;          // 0 = disabled
-  errors: number;             // consecutive provider errors since the last progress
-  category: string;           // category of the most recent error
-  samples: string[];
-  tripped: boolean;
-}
-
-export function newFailFast(threshold: number): FailFastState {
-  return { threshold, errors: 0, category: 'MODEL_PROVIDER_ERROR', samples: [], tripped: false };
-}
-
-// Returns true exactly once: on the observation that trips the threshold.
-export function observeFailFast(s: FailFastState, ev: { stderr?: string; progress?: boolean }): boolean {
-  if (s.tripped || s.threshold <= 0) return false;
-  if (ev.progress) { s.errors = 0; s.samples = []; return false; }
-  const category = ev.stderr ? providerErrorCategory(ev.stderr) : undefined;
-  if (!category) return false;
-  s.errors++;
-  s.category = category;
-  s.samples = [...s.samples, ev.stderr!.slice(0, 300)].slice(-3);
-  if (s.errors < s.threshold) return false;
-  s.tripped = true;
-  return true;
-}
-
-function providerHits(text: string): [string, string][] {
-  const out: [string, string][] = [];
-  for (const line of text.split('\n')) {
-    const m = MODEL_ERROR_PATTERNS.find(([re]) => re.test(line));
-    if (m) out.push([m[1], line]);
-  }
-  return out;
-}
-
-export function classify(f: Facts): Verdict {
-  const { room, stats } = f;
+// The run was executed by trained-assist-agent (POST /web/run-bearer, SSE).
+// Order matters: the transport and our own watchdogs explain a failure before
+// whatever the agent said last.
+export function classify(o: AgentOutcome): Verdict {
   const warnings: string[] = [];
-  const logText = [...stats.agentErrors, ...room.stderrTail].join('\n');
-  const tail = (n = 8) => room.stderrTail.slice(-n);
-
-  if (stats.toolErrors > 0) warnings.push(`${stats.toolErrors}/${stats.toolCalls} tool calls failed`);
-  if (stats.unparsedLines > 0 && f.agent === 'opencode') warnings.push(`${stats.unparsedLines} stdout lines were not JSON events`);
-
   const fail = (state: RunState, category: string, summary: string, evidence: string[], retryable: boolean, hints: string[]): Verdict =>
     ({ state, diagnosis: { category, summary, evidence, retryable, hints }, warnings });
+  const facts = [`duration_ms=${o.durationMs}`, `chunks=${o.chunks}`, `progress=${o.progress}`, `agent_session=${o.sessionId ?? '-'}`];
 
-  if (room.startError) {
-    return fail('FAILED', 'ROOM_START_FAILED', 'The container runtime could not start the room',
-      [room.startError], false,
-      ['Check `GET /healthz`: image built? runtime (runsc) registered in docker?', 'See room/docker-args.json for the exact docker command']);
+  if (o.cancelled) return fail('CANCELLED', 'CANCELLED', 'Run was cancelled by the caller', facts, true, []);
+  if (o.httpStatus === 401 || o.httpStatus === 403) {
+    return fail('FAILED', 'AGENT_AUTH_FAILED', `trained-assist-agent refused SAR's credentials (HTTP ${o.httpStatus})`,
+      [String(o.httpError ?? '').slice(0, 500)], false,
+      ['SAR_AGENT_SECRET must equal WEB_VERIFY_SECRET (or AGENT_SECRET when that is unset) on trained-assist-agent']);
   }
-  if (room.cancelled) return fail('CANCELLED', 'CANCELLED', 'Run was cancelled by the caller', [], true, []);
-  // A credential the run declared was missing or revoked, and the run did not
-  // finish cleanly: that is the cause, not whatever the agent did next.
-  if (f.credentialErrors?.length && (room.exitCode !== 0 || room.timedOut || room.idleKilled || !stats.finalText)) {
-    return { ...credentialVerdict(f.credentialErrors), warnings };
+  if (o.httpStatus !== undefined && o.httpStatus < 500) {
+    return fail('FAILED', 'AGENT_REJECTED', `trained-assist-agent rejected the run (HTTP ${o.httpStatus})`,
+      [String(o.httpError ?? '').slice(0, 500)], o.httpStatus === 409,
+      o.httpStatus === 409 ? ['The agent already accepted this run id (duplicate request); resubmit as a new run']
+        : ['Check SAR_AGENT_PROFILE and the task/files sent (see agent/request.json in the run dir)']);
   }
-  if (f.failFast?.tripped) {
-    const ff = f.failFast;
-    return fail('FAILED', ff.category, `Stopped early: ${ff.errors} provider errors in a row without agent progress`,
-      [`provider_errors=${ff.errors}`, `duration_ms=${room.durationMs}`, `tool_calls=${stats.toolCalls}`, ...ff.samples], true,
-      ['The model provider is failing right now — retry later or switch model',
-       'Threshold: SAR_FAILFAST_PROVIDER_ERRORS (0 disables)']);
+  if (o.httpStatus !== undefined || (o.transportError && !o.chunks && !o.progress && !o.sessionId)) {
+    return fail('FAILED', 'AGENT_UNAVAILABLE', 'trained-assist-agent is not reachable or failed to start the run',
+      [o.httpStatus !== undefined ? `http_status=${o.httpStatus} ${String(o.httpError ?? '').slice(0, 300)}` : String(o.transportError)], true,
+      ['Check `GET /healthz` and `systemctl status` of trained-assist-agent', 'SAR_AGENT_URL must point at it (default http://127.0.0.1:8080)']);
   }
-  if (room.oomKilled) {
-    return fail('FAILED', 'OOM_KILLED', 'Room exceeded its memory limit and was killed by the kernel',
-      [`exit_code=${room.exitCode}`, ...tail(4)], false,
-      ['Raise limits.memory_mb', 'Check what the agent was running in the last tool events']);
+  if (o.timedOut) {
+    return fail('TIMED_OUT', 'TIMEOUT', 'Run exceeded limits.timeout_s', facts, true,
+      ['Raise limits.timeout_s or split the task', 'The agent may still finish in its own session (agent_session)']);
   }
-  // Timeout/stall while the provider kept erroring and the agent never got a
-  // single tool call through: the model side is the cause, not the agent.
-  // (Seen in dogfood: OpenRouter 504 "stream error" + opencode retries every ~2 min.)
-  if ((room.timedOut || room.idleKilled) && stats.toolCalls === 0) {
-    const hits = providerHits(logText);
-    if (hits.length) {
-      const [category, sample] = hits[0];
-      return fail(room.timedOut ? 'TIMED_OUT' : 'FAILED', category,
-        `Model provider kept failing (${hits.length} errors); agent retried until ${room.timedOut ? 'timeout' : 'idle stall'} without a single tool call`,
-        [`provider_errors=${hits.length}`, sample.slice(0, 500)], true,
-        ['Switch model — this one is unavailable/overloaded right now', 'Errors were spread out with retries in between, so fail-fast (SAR_FAILFAST_PROVIDER_ERRORS) did not trip']);
+  if (o.idleKilled) {
+    return fail('FAILED', 'IDLE_STALL', 'No progress from the agent for limits.idle_timeout_s — it hung', facts, true,
+      ['Often a model call that never returns, or a long command without progress events', 'Raise limits.idle_timeout_s for long builds']);
+  }
+  if (o.transportError) {
+    return fail('FAILED', 'AGENT_STREAM_LOST', 'Connection to trained-assist-agent broke mid-run', [String(o.transportError), ...facts], true,
+      ['Usually trained-assist-agent restarted; the answer may still land in its session (agent_session)', 'Resubmit the run']);
+  }
+  if (o.agentError) {
+    const category = providerErrorCategory(o.agentError);
+    if (category) {
+      return fail('FAILED', category, `Model provider error (${category.toLowerCase().replace(/_/g, ' ')})`, [o.agentError.slice(0, 500)],
+        MODEL_ERROR_PATTERNS.find(([, c]) => c === category)![2], ['Retry later; the trained-assist profile decides which model runs']);
     }
+    return fail('FAILED', 'AGENT_CRASHED', 'trained-assist-agent reported an error', [o.agentError.slice(0, 1000), ...facts], true,
+      ['See trained-assist-agent logs (journalctl) for this session']);
   }
-  if (room.timedOut) {
-    return fail('TIMED_OUT', 'TIMEOUT', 'Run exceeded limits.timeout_s',
-      [`duration_ms=${room.durationMs}`, `steps=${stats.steps}`, `tool_calls=${stats.toolCalls}`,
-       `model_ms=${stats.timing.modelMs}`, `tool_ms=${stats.timing.toolMs}`, `open_step_ms=${stats.timing.openMs}`], true,
-      [
-        ...(stats.steps > 30 ? ['Agent made many steps — probably looping; inspect repeated tool calls'] : ['Raise limits.timeout_s or split the task']),
-        ...(stats.timing.openMs > 0 ? ['open_step_ms: the last step never finished — a model call or a still-running command; check the last agent.tool and room.stderr'] : []),
-      ]);
+  if (!o.done) {
+    return fail('FAILED', 'AGENT_STREAM_LOST', 'Stream from trained-assist-agent ended without a result', facts, true,
+      ['trained-assist-agent closed the connection early — check its logs', 'Resubmit the run']);
   }
-  if (room.idleKilled) {
-    return fail('FAILED', 'IDLE_STALL', 'No output from the agent for limits.idle_timeout_s — it hung',
-      [`steps=${stats.steps}`, `last_step_reason=${stats.lastStepReason ?? '-'}`, ...tail(4)], true,
-      ['Often a model call that never returns, or an interactive command waiting for stdin',
-       'Look at the last agent.tool event: was it a long-running or interactive command?']);
+  if (!o.finalText?.trim()) {
+    return fail('FAILED', 'AGENT_EMPTY_RESULT', 'Agent finished without an answer', facts, true,
+      ['Weak model or prompt misunderstanding — make the task ask for a concrete answer']);
   }
-
-  // The agent CLI itself exited — look for provider/model errors first: with
-  // free models these dominate and are not the agent's fault.
-  for (const [re, category, retryable] of MODEL_ERROR_PATTERNS) {
-    const hit = logText.split('\n').find(l => re.test(l));
-    if (hit && (room.exitCode !== 0 || stats.steps === 0 || !stats.finalText)) {
-      return fail('FAILED', category, `Model provider error (${category.toLowerCase().replace(/_/g, ' ')})`,
-        [hit.slice(0, 500)], retryable,
-        retryable ? ['Retry later or switch model'] : ['Fix model id / credentials in the request or secrets file']);
-    }
-  }
-
-  if (room.exitCode !== 0) {
-    const cmdMissing = room.exitCode === 126 || room.exitCode === 127;
-    return fail('FAILED', cmdMissing ? 'AGENT_BINARY_MISSING' : 'AGENT_CRASHED',
-      cmdMissing ? 'Agent command not found / not executable in the room image'
-        : `Agent process exited with code ${room.exitCode}`,
-      [`exit_code=${room.exitCode}`, ...tail()], !cmdMissing,
-      cmdMissing ? ['Rebuild the room image'] : ['Read room/stderr.log for the stack trace']);
-  }
-
-  // "Nothing to hand over" checks apply to every real agent; only the deterministic
-  // shell agent (tests) is exempt.
-  if (f.agent !== 'shell') {
-    if (stats.parsedLines === 0) {
-      return fail('FAILED', 'AGENT_NO_OUTPUT', 'Agent exited cleanly but emitted no events',
-        tail(), true, ['Usually a silent provider/config failure; rerun with --log-level DEBUG']);
-    }
-    if (!stats.finalText && stats.toolCalls === 0) {
-      return fail('FAILED', 'AGENT_EMPTY_RESULT', 'Agent finished without a single tool call or answer',
-        [`steps=${stats.steps}`, `last_step_reason=${stats.lastStepReason ?? '-'}`], true,
-        ['Weak model or prompt misunderstanding — try a stronger model']);
-    }
-    if (stats.lastStepReason && stats.lastStepReason !== 'stop') {
-      warnings.push(`last step ended with reason=${stats.lastStepReason}, not "stop" — the answer may be truncated`);
-    }
-  }
-
-  if (f.exportError) {
-    return fail('FAILED', 'EXPORT_FAILED', 'Agent succeeded but artifacts could not be exported', [f.exportError], true, []);
-  }
-
   return { state: 'SUCCEEDED', warnings };
-}
-
-// Missing/revoked credentials, either at PREPARING (env delivery, before a room
-// starts) or reported by the gateway during the run. Revoked wins: it needs the
-// owner to act, a missing one may just be a typo in the handle.
-export function credentialVerdict(errs: { code: 'CREDENTIAL_MISSING' | 'CREDENTIAL_REVOKED'; ref: string }[]): Verdict {
-  const revoked = errs.filter(e => e.code === 'CREDENTIAL_REVOKED');
-  const category = revoked.length ? 'CREDENTIAL_REVOKED' : 'CREDENTIAL_MISSING';
-  const refs = (revoked.length ? revoked : errs).map(e => e.ref);
-  return { state: 'FAILED', warnings: [], diagnosis: category === 'CREDENTIAL_REVOKED'
-    ? { category, summary: `Credential revoked by its owner: ${refs.join(', ')}`, evidence: errs.map(e => `${e.code} ${e.ref}`),
-        retryable: false, hints: ['Store the credential again in ZeroCreds (a new handle or the same name) and rerun'] }
-    : { category, summary: `Credential not found in the run owner's namespace: ${refs.join(', ')}`, evidence: errs.map(e => `${e.code} ${e.ref}`),
-        retryable: false, hints: ['Check the handle (cred:<name> or cred:<your-owner>/<name>)', 'Handles of other owners are never resolved', 'Store it via ZeroCreds first'] } };
 }
 
 // --- Result contract (SB1). A run that "succeeded" but did not deliver what the

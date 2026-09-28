@@ -9,6 +9,7 @@
 import { createHmac } from 'node:crypto';
 import type { RunEvent } from './store.ts';
 import { Coalescer } from './stream.ts';
+import { config } from './config.ts';
 
 export interface WebhookTarget { url: string; secret?: string; agent_events?: boolean | 'coalesced' }
 
@@ -53,7 +54,7 @@ async function send(target: WebhookTarget, ev: RunEvent, record: (type: string, 
   let lastErr = '';
   for (let attempt = 1; attempt <= 4; attempt++) {
     try {
-      const res = await fetch(target.url, { method: 'POST', headers, body, signal: AbortSignal.timeout(10_000) });
+      const res = await fetch(target.url, { method: 'POST', headers, body, signal: AbortSignal.timeout(config.webhookTimeoutMs) });
       if (res.ok) return;
       lastErr = `HTTP ${res.status}`;
       if (res.status >= 400 && res.status < 500 && res.status !== 429) break;

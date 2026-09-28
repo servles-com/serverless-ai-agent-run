@@ -75,7 +75,7 @@ test('summarize: counts, last text/tool, caps the event list', () => {
 test('redaction before fan-out: bus listeners, events.jsonl and coalesced batches never see the secret', () => {
   const secret = 'sk-stream-fanout-secret-777';
   setSecrets([secret]);
-  const rec = createRun({ agent: 'shell', task: 'x' });
+  const rec = createRun({ agent: 'opencode', task: 'x' });
   const seen: RunEvent[] = [];
   const on = (e: RunEvent) => seen.push(e);
   bus.on(rec.id, on);
@@ -91,8 +91,8 @@ test('redaction before fan-out: bus listeners, events.jsonl and coalesced batche
 });
 
 test('stream token: reads only its own run, only GET on read routes', () => {
-  const a = createRun({ agent: 'shell', task: 'a' });
-  const b = createRun({ agent: 'shell', task: 'b' });
+  const a = createRun({ agent: 'opencode', task: 'a' });
+  const b = createRun({ agent: 'opencode', task: 'b' });
   const ta = issueStreamToken(a);
   const tb = issueStreamToken(b);
   assert.ok(ta.startsWith(STREAM_TOKEN_PREFIX));
@@ -125,7 +125,7 @@ test('parseTypes: classes, exact types, run.completed always passes, unknown rej
 });
 
 test('transcript: readable markdown of the session', () => {
-  const rec = createRun({ agent: 'shell', task: 'echo hi' });
+  const rec = createRun({ agent: 'opencode', task: 'echo hi' });
   const md = renderTranscript(rec, [ev(1, 'run.state', { state: 'RUNNING' }), ev(2, 'agent.stdout', { line: 'hi' }),
     ev(3, 'agent.tool', { tool: 'bash', status: 'completed', input: { cmd: 'ls' }, output: 'a.txt' }),
     ev(4, 'room.stderr', { line: 'noise' }), ev(5, 'run.completed', { state: 'SUCCEEDED', category: 'OK' })]);
