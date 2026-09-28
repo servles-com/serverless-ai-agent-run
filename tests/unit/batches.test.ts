@@ -4,7 +4,7 @@ import { expandBatch, summarize, reportMarkdown, itemView, type ItemView } from 
 import type { RunRecord } from '../../src/store.ts';
 
 test('expandBatch: template + items + vars -> validated run requests', () => {
-  const x = expandBatch({ run: { agent: 'opencode', task: 'echo {{name}} > /artifacts/{{name}}.txt', expect: { artifacts: ['*.txt'] } },
+  const x = expandBatch({ run: { agent: 'opencode', task: 'echo {{name}} > /artifacts/{{name}}.txt', expect: { text: 'alpha|beta' } },
     items: [{ id: 'a', vars: { name: 'alpha' } }, { vars: { name: 'beta' }, files: { 'in.txt': 'x' } }, { task: 'echo custom' }], concurrency: 2 }, 3);
   assert.ok(!('error' in x), JSON.stringify(x));
   if ('error' in x) return;
@@ -13,7 +13,7 @@ test('expandBatch: template + items + vars -> validated run requests', () => {
   assert.equal(x.items[0].request.task, 'echo alpha > /artifacts/alpha.txt');
   assert.deepEqual(x.items[1].request.files, { 'in.txt': 'x' });
   assert.equal(x.items[2].request.task, 'echo custom');
-  assert.deepEqual(x.items[0].request.expect, { artifacts: ['*.txt'] }, 'expect from the template');
+  assert.deepEqual(x.items[0].request.expect, { text: 'alpha|beta' }, 'expect from the template');
   assert.equal(x.items[0].request.metadata?.batch_item, 'a');
 });
 
