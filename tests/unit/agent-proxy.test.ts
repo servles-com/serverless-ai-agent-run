@@ -45,7 +45,7 @@ async function fakeAgent(req: IncomingMessage, res: ServerResponse) {
   if (mode === 'drop') return res.destroy();
   // 'hang': only keep-alives until the client goes away.
   const t = setInterval(() => res.write('event: ping\ndata: {}\n\n'), 100);
-  req.on('close', () => clearInterval(t));
+  res.on('close', () => clearInterval(t));
 }
 
 before(async () => {
