@@ -12,7 +12,7 @@
 //   POST /runs/:id/cancel
 //   POST /batches                    N tasks -> N runs, at most `concurrency` at a time (src/batches.ts)
 //   GET  /batches[/:id[/report]]     summary / markdown report; POST /batches/:id/cancel
-//   GET  /healthz                    is trained-assist-agent reachable (no auth)
+//   GET  /healthz                    is the configured backend reachable (no auth)
 //
 // Auth: the master API token, or a run's stream_token (read-only, that run only).
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
@@ -190,7 +190,7 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
 
   if (req.method === 'GET' && url.pathname === '/healthz') {
     const agent = await agentHealth();
-    return send(res, agent.ok ? 200 : 503, { ok: agent.ok, backend: 'trained-assist-agent', agent, ...stats() });
+    return send(res, agent.ok ? 200 : 503, { ok: agent.ok, backend: config.backend, agent, ...stats() });
   }
   const token = presentedToken(req, url);
   if (isStreamToken(token)) {

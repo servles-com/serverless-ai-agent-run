@@ -1,10 +1,10 @@
 # src
 
 ```text
-API (server.ts) -> Run Manager (runner.ts, queue.ts) -> Agent Proxy (agent-proxy.ts) -> trained-assist-agent
+API (server.ts) -> Run Manager (runner.ts, queue.ts) -> Agent Proxy (agent-proxy.ts) -> configured backend
 ```
 
 The Run Manager owns the run lifecycle, events, webhooks and the verdict
-(failures.ts). The Agent Proxy owns only how a run is handed to trained-assist-agent
-and how its SSE answer is read back. Local Docker/gVisor rooms are paused:
+(failures.ts). The Agent Proxy owns backend-specific submit, event streaming, cancel and health
+for trained-assist-agent or the opt-in Runner API. Local Docker/gVisor rooms are paused:
 docs/docker-gvisor-pause.md.

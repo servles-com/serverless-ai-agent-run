@@ -5,12 +5,17 @@ Worker**. Отправляешь `POST /runs` с задачей (и файлам
 прогресс приходит на твой вебхук, результат забираешь по API. Любое падение
 заканчивается машиночитаемым диагнозом: *почему* упало, с доказательствами и подсказкой.
 
-**С 2026-09-28 SAR — тонкий прокси.** Сам ран выполняет
+**С 2026-09-28 SAR — тонкий прокси.** По умолчанию ран выполняет
 [trained-assist-agent](https://github.com/trained-assist/trained-assist-agent) на той же
 машине (`POST /web/run-bearer`, ответ потоком SSE); изоляция — его slots + ACL профиля,
 движок и модель выбирает профиль (`SAR_AGENT_PROFILE`). Свои Docker/gVisor-комнаты
 **на паузе**: как были устроены и как вернуть — [docs/docker-gvisor-pause.md](docs/docker-gvisor-pause.md).
-SAR держит контракт: API, вебхуки с HMAC, диагноз, стриминг, пачки, CLI.
+Можно выбрать `SAR_BACKEND=runner-api`: тогда SAR отправляет задачу в
+[ai-agent-runner](https://github.com/trained-assist/ai-agent-runner), читает replayable SSE,
+отменяет по `runId` и забирает финальный результат. Principal, профиль и repository binding
+при этом задаёт доверенная конфигурация Runner API; SAR request не может их переопределить. Режим остаётся opt-in до проверки
+на настроенном Runner API и VM Worker. SAR держит внешний контракт: API, вебхуки с HMAC,
+диагноз, стриминг, пачки, CLI.
 
 > **North Star:** [docs/north-star-user-scenario.md](docs/north-star-user-scenario.md) · путь: [docs/north-star-roadmap.md](docs/north-star-roadmap.md) — агенты пачками по API на своей машине,
 > каждый в своей изоляции; GitHub как полноценный житель; креды без LLM; результат всегда PR, файл или явная ошибка.
@@ -44,7 +49,9 @@ POST /runs ──► валидация (то, что бэкенд не умее
                                    PREPARING│ task + входные файлы + repo → один текст задачи
                                             │ runs/<id>/agent/request.json
                                             ▼
-                                    RUNNING │ POST {SAR_AGENT_URL}/web/run-bearer
+                                    RUNNING │ selected backend:
+                                            │ trained-assist-agent → POST /web/run-bearer (SSE)
+                                            │ runner-api → POST /v1/runs, GET /events (SSE), GET /result
                                             │   Authorization: Bearer SAR_AGENT_SECRET
                                             │   {username: SAR_AGENT_PROFILE, task, requestId: run_id}
                                             │ SSE: session | progress | chunk | done | error (+ ping)
@@ -133,7 +140,7 @@ GET  /runs/{id}/artifacts/{path}  скачать
 POST /runs/{id}/cancel
 POST /batches                     N задач → N ранов, не больше concurrency одновременно → 202 {id}
 GET  /batches[/{id}[/report]]     сводка пачки / отчёт markdown; POST /batches/{id}/cancel
-GET  /healthz                     доступен ли trained-assist-agent, очередь
+GET  /healthz                     доступен ли выбранный backend, очередь
 ```
 
 ```json
@@ -228,6 +235,13 @@ journalctl -u sar -f                           # строка на старт/ф
 `SAR_AGENT_SECRET` = `WEB_VERIFY_SECRET` trained-assist-agent (или его `AGENT_SECRET`, если
 первый не задан). Профиль `SAR_AGENT_PROFILE` (по умолчанию `sar-proxy`) — отдельный
 профиль trained-assist под раны SAR: его движок, модель и креды применяются ко всем ранам.
+
+Для Runner API переключение задаётся в `/opt/sar/.env`: установить `SAR_BACKEND=runner-api`,
+задать `SAR_RUNNER_API_URL` и `SAR_RUNNER_API_TOKEN`, затем перезапустить `sar`. Токен должен
+быть привязан к SAR principal с `runs:write`/`runs:read` scopes и нужному профилю. Перед
+переключением `GET /healthz` должен показывать `backend: "runner-api"` и `ok: true`; Runner API
+должен иметь зарегистрированный совместимый VM Worker. Если проверка не проходит, оставить
+`SAR_BACKEND=trained-assist-agent`.
 
 Снаружи — через nginx trained-assist (долгие раны держат SSE):
 

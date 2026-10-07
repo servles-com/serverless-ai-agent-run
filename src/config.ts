@@ -12,15 +12,19 @@ export const config = {
   apiToken: process.env.SAR_API_TOKEN ?? '',
   insecureDev: process.env.SAR_INSECURE_DEV === '1',
   dataDir: resolve(process.env.SAR_DATA_DIR ?? 'runtime-data'),
-  // Runs in flight at once (each one is a task on trained-assist-agent).
+  // Runs in flight at once, independent of the selected execution backend.
   maxRooms: num('SAR_MAX_ROOMS', 2),
 
-  // Execution backend: trained-assist-agent on the same machine (src/agent-proxy.ts).
+  // Execution backend. `runner-api` uses the RunSpec admission API; the legacy agent
+  // remains selectable during rollout so a failed canary can be rolled back by config.
+  backend: process.env.SAR_BACKEND ?? 'trained-assist-agent',
   agentUrl: process.env.SAR_AGENT_URL ?? 'http://127.0.0.1:8080',
   // WEB_VERIFY_SECRET of trained-assist-agent (or its AGENT_SECRET when that is unset).
   agentSecret: process.env.SAR_AGENT_SECRET ?? '',
   // trained-assist profile (username) that SAR runs belong to; it picks engine and model.
   agentProfile: process.env.SAR_AGENT_PROFILE ?? 'sar-proxy',
+  runnerApiUrl: (process.env.SAR_RUNNER_API_URL ?? 'http://127.0.0.1:8790').replace(/\/+$/, ''),
+  runnerApiToken: process.env.SAR_RUNNER_API_TOKEN ?? '',
 
   defaults: {
     timeoutS: num('SAR_DEFAULT_TIMEOUT_S', 900),
@@ -37,4 +41,4 @@ export const config = {
 
 // Register every known secret value for redaction before it can reach events,
 // logs or webhooks. See src/redact.ts.
-setSecrets([config.agentSecret, config.apiToken]);
+setSecrets([config.agentSecret, config.runnerApiToken, config.apiToken]);
