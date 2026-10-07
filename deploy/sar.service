@@ -1,8 +1,8 @@
-# SAR API proxy in front of trained-assist-agent (same machine).
+# SAR API proxy in front of the configured execution backend.
 # Install: useradd --system --home /var/lib/sar sar; cp deploy/sar.service /etc/systemd/system/;
 #          cp .env.example /opt/sar/.env (fill in, chmod 600, chown sar); systemctl enable --now sar
 [Unit]
-Description=Serverless AI Agent Run (API proxy to trained-assist-agent)
+Description=Serverless AI Agent Run (execution API proxy)
 After=network-online.target assist-agent.service
 Wants=network-online.target
 

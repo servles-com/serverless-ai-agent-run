@@ -9,7 +9,7 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AddressInfo } from 'node:net';
-import { buildAgentRequest, buildAgentTask, ignoredFields, parseSse, runOnAgent, validateRequest, type AgentProxyConfig } from '../../src/agent-proxy.ts';
+import { agentHealth, buildAgentRequest, buildAgentTask, ignoredFields, parseSse, runOnAgent, validateRequest, type AgentProxyConfig } from '../../src/agent-proxy.ts';
 import type { RunRequest } from '../../src/store.ts';
 
 const SECRET = 'agent-secret-for-tests';
@@ -51,7 +51,8 @@ async function fakeAgent(req: IncomingMessage, res: ServerResponse) {
 before(async () => {
   agent = createServer((req, res) => { void fakeAgent(req, res); });
   await new Promise<void>(r => agent.listen(0, '127.0.0.1', r));
-  cfg = { agentUrl: `http://127.0.0.1:${(agent.address() as AddressInfo).port}`, agentSecret: SECRET, profile: 'sar-proxy' };
+  cfg = { backend: 'trained-assist-agent', agentUrl: `http://127.0.0.1:${(agent.address() as AddressInfo).port}`, agentSecret: SECRET,
+    profile: 'sar-proxy', runnerApiUrl: '', runnerApiToken: '' };
 });
 after(() => { agent.closeAllConnections(); agent.close(); });
 
@@ -135,6 +136,89 @@ test('idle watchdog ignores keep-alive pings; timeout and cancel stop the agent 
   await new Promise(r => setTimeout(r, 100));
   const stops = received.filter(r => r.path === '/web/stop-bearer').map(r => r.body.id);
   assert.ok(stops.includes(o.sessionId), `stop-bearer called for ${o.sessionId}: ${stops}`);
+});
+
+test('Runner API backend submits with idempotency, streams progress, fetches final result and cancels by runId', async (t) => {
+  let submitted: { body?: Json; idempotencyKey?: string; authorization?: string } = {};
+  let cancelled = '';
+  let streamOpened = false;
+  let eventStreamCount = 0;
+  const eventCursors: string[] = [];
+  const runnerRunId = 'run_runner_123';
+  const api = createServer(async (req, res) => {
+    if (req.url === '/v1/capabilities') {
+      assert.equal(req.headers.authorization, 'Bearer runner-key');
+      res.end(JSON.stringify({ contract: { name: 'ai-agent-runner/serverless-agent-api' } })); return;
+    }
+    if (req.url === '/v1/runs' && req.method === 'POST') {
+      let raw = ''; for await (const c of req) raw += c;
+      submitted = { body: JSON.parse(raw), idempotencyKey: Array.isArray(req.headers['idempotency-key']) ? req.headers['idempotency-key'][0] : req.headers['idempotency-key'],
+        authorization: Array.isArray(req.headers.authorization) ? req.headers.authorization[0] : req.headers.authorization };
+      res.writeHead(202, { 'content-type': 'application/json' }); res.end(JSON.stringify({ runId: runnerRunId })); return;
+    }
+    if (req.url?.startsWith(`/v1/runs/${runnerRunId}/events`)) {
+      streamOpened = true;
+      eventStreamCount++;
+      eventCursors.push(new URL(req.url, 'http://runner.test').searchParams.get('cursor') ?? '');
+      res.writeHead(200, { 'content-type': 'text/event-stream' });
+      res.write('event: snapshot\ndata: {"state":"running"}\n\n');
+      if (eventStreamCount === 1) {
+        res.end('id: 1\nevent: log\ndata: {"sequence":1,"type":"log","payload":{"stream":"stdout","message":"working"}}\n\n'); return;
+      }
+      res.end('id: 2\nevent: succeeded\ndata: {"sequence":2,"type":"succeeded","payload":{"outcome":"succeeded"}}\n\n'); return;
+    }
+    if (req.url === `/v1/runs/${runnerRunId}/result`) {
+      res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ outcome: 'succeeded', text: 'Runner answer' })); return;
+    }
+    if (req.url === `/v1/runs/${runnerRunId}/cancel`) {
+      cancelled = runnerRunId; res.writeHead(202); res.end('{}'); return;
+    }
+    if (req.url === `/v1/runs/${runnerRunId}/status`) {
+      res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ state: 'running' })); return;
+    }
+    res.writeHead(404); res.end('{}');
+  });
+  await new Promise<void>(r => api.listen(0, '127.0.0.1', r));
+  t.after(() => { api.closeAllConnections(); api.close(); });
+  const runnerCfg: AgentProxyConfig = { ...cfg, backend: 'runner-api', runnerApiUrl: `http://127.0.0.1:${(api.address() as AddressInfo).port}`, runnerApiToken: 'runner-key' };
+  assert.equal((await agentHealth(runnerCfg)).ok, true);
+  assert.equal((await agentHealth({ ...runnerCfg, runnerApiToken: '' })).error, 'SAR_RUNNER_API_TOKEN is not set');
+  const events: { type: string; data: Record<string, unknown> }[] = [];
+  const handle = runOnAgent({ runId: 'run_sar_1', req: req('Fix calc.py', { repo: { url: 'https://github.com/acme/calc.git', ref: 'main' } }),
+    timeoutS: 5, idleTimeoutS: 5, onEvent: ev => events.push(ev) }, runnerCfg);
+  const outcome = await handle.done;
+  assert.equal(submitted.authorization, 'Bearer runner-key');
+  assert.equal(submitted.idempotencyKey, 'run_sar_1');
+  assert.equal(submitted.body?.repository, undefined, 'repository/workspace remains bound to the Runner API principal');
+  assert.match(String((submitted.body?.input as Json).inlinePrompt), /Repository: https:\/\/github.com\/acme\/calc.git \(ref: main\)/);
+  assert.equal(outcome.done, true);
+  assert.equal(outcome.finalText, 'Runner answer');
+  assert.equal(outcome.sessionId, runnerRunId);
+  assert.ok(events.some(ev => ev.type === 'progress' && ev.data.message === 'working'));
+  assert.equal(events.at(-1)?.type, 'done');
+  assert.deepEqual(eventCursors, ['0', '1'], 'reconnected event stream resumes from its last sequence');
+
+  const tooLarge = await runOnAgent({ runId: 'run_sar_large', req: req('x'.repeat(100_001)), timeoutS: 5, idleTimeoutS: 5, onEvent: () => {} }, runnerCfg).done;
+  assert.equal(tooLarge.httpStatus, 413);
+  assert.match(tooLarge.httpError!, /Runner API limit/);
+
+  const hangingApi = createServer(async (req, res) => {
+    if (req.url === '/v1/runs' && req.method === 'POST') { for await (const _ of req) { /* consume */ } res.writeHead(202, { 'content-type': 'application/json' }); res.end(JSON.stringify({ runId: runnerRunId })); return; }
+    if (req.url?.startsWith(`/v1/runs/${runnerRunId}/events`)) { streamOpened = true; res.writeHead(200, { 'content-type': 'text/event-stream' }); res.write('event: snapshot\ndata: {"state":"running"}\n\n'); return; }
+    if (req.url === `/v1/runs/${runnerRunId}/cancel`) { cancelled = runnerRunId; res.writeHead(202); res.end('{}'); return; }
+    res.writeHead(404); res.end('{}');
+  });
+  await new Promise<void>(r => hangingApi.listen(0, '127.0.0.1', r));
+  t.after(() => { hangingApi.closeAllConnections(); hangingApi.close(); });
+  streamOpened = false;
+  const cancelHandle = runOnAgent({ runId: 'run_sar_cancel', req: req('hang'), timeoutS: 10, idleTimeoutS: 10, onEvent: () => {} },
+    { ...runnerCfg, runnerApiUrl: `http://127.0.0.1:${(hangingApi.address() as AddressInfo).port}` });
+  for (let i = 0; i < 100 && !streamOpened; i++) await new Promise(r => setTimeout(r, 10));
+  cancelHandle.cancel();
+  const cancelledOutcome = await cancelHandle.done;
+  assert.equal(cancelledOutcome.cancelled, true);
+  for (let i = 0; i < 100 && !cancelled; i++) await new Promise(r => setTimeout(r, 10));
+  assert.equal(cancelled, runnerRunId);
 });
 
 // --- The whole SAR API in front of the fake agent: POST /runs -> webhook -> GET /runs/:id.

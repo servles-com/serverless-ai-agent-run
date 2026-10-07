@@ -1,8 +1,11 @@
-// Agent proxy: a SAR run is executed by trained-assist-agent, not in a local room.
+// Agent proxy: selects the configured trusted backend; the request cannot choose it.
 //
 //   SAR request ──► POST {SAR_AGENT_URL}/web/run-bearer  {username, task, requestId}
 //                   Authorization: Bearer SAR_AGENT_SECRET
 //               ◄── SSE: session | progress | chunk | done | error  (+ ping every 15 s)
+//
+// In `SAR_BACKEND=runner-api` mode, SAR submits to POST {SAR_RUNNER_API_URL}/v1/runs,
+// follows replayable /events SSE, then fetches /result and cancels by Runner runId.
 //
 // `/web/run-bearer` is trained-assist's server-to-server entry point: it runs a real
 // task for one profile and streams the answer back on the same connection. (`/run`
@@ -14,9 +17,12 @@ import { validateExpect } from './failures.ts';
 import type { RunRequest } from './store.ts';
 
 export interface AgentProxyConfig {
+  backend: 'trained-assist-agent' | 'runner-api';
   agentUrl: string;
   agentSecret: string;
   profile: string;            // trained-assist username the runs belong to
+  runnerApiUrl: string;
+  runnerApiToken: string;
 }
 
 // Everything the classifier needs to explain how a run ended (failures.ts).
@@ -52,7 +58,17 @@ export interface AgentRunOptions {
 const MAX_INLINE_FILES_BYTES = 1024 * 1024;
 
 export const proxyConfig = (): AgentProxyConfig =>
-  ({ agentUrl: config.agentUrl.replace(/\/+$/, ''), agentSecret: config.agentSecret, profile: config.agentProfile });
+  {
+    if (config.backend !== 'trained-assist-agent' && config.backend !== 'runner-api') {
+      throw new Error(`unsupported SAR_BACKEND "${config.backend}" (expected trained-assist-agent or runner-api)`);
+    }
+    const runnerUrl = new URL(config.runnerApiUrl);
+    if (runnerUrl.protocol !== 'https:' && !(runnerUrl.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(runnerUrl.hostname))) {
+      throw new Error('SAR_RUNNER_API_URL must use HTTPS unless it points to loopback');
+    }
+    return { backend: config.backend, agentUrl: config.agentUrl.replace(/\/+$/, ''), agentSecret: config.agentSecret,
+      profile: config.agentProfile, runnerApiUrl: config.runnerApiUrl, runnerApiToken: config.runnerApiToken };
+  };
 
 // Untrusted JSON body: fields are checked here before it is treated as a RunRequest.
 // Anything the agent backend cannot honour is refused up front, not failed after minutes.
@@ -83,6 +99,9 @@ export function validateRequest(input: unknown): string | undefined {
   const expectErr = validateExpect(body.expect, false);
   if (expectErr) return expectErr;
   if (body.expect?.artifacts || body.expect?.json) return 'expect.artifacts / expect.json: the trained-assist backend returns no artifacts yet (phase 2); use expect.text';
+  if (config.backend === 'runner-api' && buildAgentTask(input as RunRequest).length > RUNNER_API_MAX_PROMPT_CHARS) {
+    return `task and inline files exceed Runner API limit of ${RUNNER_API_MAX_PROMPT_CHARS} characters`;
+  }
   return undefined;
 }
 
@@ -133,6 +152,7 @@ export function parseSse(buffer: string): { frames: { event?: string; data: stri
 }
 
 export function runOnAgent(o: AgentRunOptions, cfg: AgentProxyConfig = proxyConfig()): AgentHandle {
+  if (cfg.backend === 'runner-api') return runOnRunnerApi(o, cfg);
   const out: AgentOutcome = { done: false, chunks: 0, progress: 0, timedOut: false, idleKilled: false, cancelled: false, durationMs: 0 };
   const ctrl = new AbortController();
   const started = Date.now();
@@ -203,6 +223,7 @@ export function runOnAgent(o: AgentRunOptions, cfg: AgentProxyConfig = proxyConf
 // (`session` frame) or the run finished. Closing the SSE connection alone does not
 // stop the task on the agent side.
 export async function stopOnAgent(sessionId: string, cfg: AgentProxyConfig = proxyConfig()): Promise<boolean> {
+  if (cfg.backend === 'runner-api') return runnerApiCancel(sessionId, cfg);
   try {
     const res = await fetch(`${cfg.agentUrl}/web/stop-bearer`, {
       method: 'POST',
@@ -215,6 +236,19 @@ export async function stopOnAgent(sessionId: string, cfg: AgentProxyConfig = pro
 }
 
 export async function agentHealth(cfg: AgentProxyConfig = proxyConfig()): Promise<{ ok: boolean; url: string; status?: number; error?: string }> {
+  if (cfg.backend === 'runner-api') {
+    if (!cfg.runnerApiToken) return { ok: false, url: cfg.runnerApiUrl, error: 'SAR_RUNNER_API_TOKEN is not set' };
+    try {
+      const res = await fetch(`${cfg.runnerApiUrl}/v1/capabilities`, {
+        headers: { authorization: `Bearer ${cfg.runnerApiToken}` }, signal: AbortSignal.timeout(5000),
+      });
+      const body = await res.json().catch(() => ({})) as { contract?: { name?: string } };
+      const ok = res.ok && body.contract?.name === 'ai-agent-runner/serverless-agent-api';
+      return { ok, url: cfg.runnerApiUrl, status: res.status, ...(ok ? {} : { error: 'Runner API token or contract check failed' }) };
+    } catch (e) {
+      return { ok: false, url: cfg.runnerApiUrl, error: errorText(e) };
+    }
+  }
   if (!cfg.agentSecret) return { ok: false, url: cfg.agentUrl, error: 'SAR_AGENT_SECRET is not set' };
   try {
     const res = await fetch(`${cfg.agentUrl}/health`, { signal: AbortSignal.timeout(5000) });
@@ -222,6 +256,169 @@ export async function agentHealth(cfg: AgentProxyConfig = proxyConfig()): Promis
   } catch (e) {
     return { ok: false, url: cfg.agentUrl, error: errorText(e) };
   }
+}
+
+const RUNNER_API_MAX_PROMPT_CHARS = 100_000;
+const RUNNER_TERMINAL = new Set(['succeeded', 'failed', 'cancelled']);
+
+function runOnRunnerApi(o: AgentRunOptions, cfg: AgentProxyConfig): AgentHandle {
+  const out: AgentOutcome = { done: false, chunks: 0, progress: 0, timedOut: false, idleKilled: false, cancelled: false, durationMs: 0 };
+  const ctrl = new AbortController();
+  const started = Date.now();
+  let lastActivity = started;
+  let runnerRunId: string | undefined;
+  let cancelRequested = false;
+  const stop = (why: 'timedOut' | 'idleKilled' | 'cancelled') => {
+    if (out.done || out[why]) return;
+    out[why] = true;
+    ctrl.abort();
+    if (runnerRunId) void runnerApiCancel(runnerRunId, cfg);
+  };
+  const hardTimer = setTimeout(() => stop('timedOut'), o.timeoutS * 1000);
+  const idleTimer = setInterval(() => { if (Date.now() - lastActivity > o.idleTimeoutS * 1000) stop('idleKilled'); }, 1000);
+
+  const done = (async (): Promise<AgentOutcome> => {
+    try {
+      if (!cfg.runnerApiToken) {
+        out.httpError = 'SAR_RUNNER_API_TOKEN is not set';
+        out.httpStatus = 503;
+        return out;
+      }
+      const prompt = buildAgentTask(o.req);
+      if (prompt.length > RUNNER_API_MAX_PROMPT_CHARS) {
+        out.httpError = `task and inline files exceed Runner API limit of ${RUNNER_API_MAX_PROMPT_CHARS} characters`;
+        out.httpStatus = 413;
+        return out;
+      }
+      const request: Record<string, unknown> = {
+        userTaskId: o.runId,
+        conversationId: `sar:${o.runId}`,
+        input: { inlinePrompt: prompt },
+        envAllowlist: [],
+        limits: { timeoutMs: Math.max(1000, o.timeoutS * 1000) },
+      };
+      const accepted = await fetch(`${cfg.runnerApiUrl}/v1/runs`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${cfg.runnerApiToken}`, 'idempotency-key': o.runId },
+        body: JSON.stringify(request), signal: ctrl.signal,
+      });
+      if (!accepted.ok) {
+        out.httpStatus = accepted.status;
+        out.httpError = (await accepted.text().catch(() => '')).slice(0, 2000);
+        return out;
+      }
+      const receipt = await accepted.json() as { runId?: unknown };
+      runnerRunId = typeof receipt.runId === 'string' ? receipt.runId : undefined;
+      if (!runnerRunId) {
+        out.transportError = 'Runner API accepted the request without a runId receipt';
+        return out;
+      }
+      out.sessionId = runnerRunId;
+      o.onEvent({ type: 'session', data: { session_id: runnerRunId } });
+      if (cancelRequested) {
+        out.cancelled = true;
+        void runnerApiCancel(runnerRunId, cfg);
+        ctrl.abort();
+      }
+
+      let cursor = 0;
+      let terminal = false;
+      while (!terminal && !ctrl.signal.aborted) {
+        const stream = await fetch(`${cfg.runnerApiUrl}/v1/runs/${encodeURIComponent(runnerRunId)}/events?cursor=${cursor}`, {
+          headers: { accept: 'text/event-stream', authorization: `Bearer ${cfg.runnerApiToken}` }, signal: ctrl.signal,
+        });
+        if (!stream.ok || !stream.body) {
+          out.httpStatus = stream.status;
+          out.httpError = (await stream.text().catch(() => '')).slice(0, 2000);
+          break;
+        }
+        const decoder = new TextDecoder();
+        let buf = '';
+        for await (const bytes of stream.body as unknown as AsyncIterable<Uint8Array>) {
+          buf += decoder.decode(bytes, { stream: true });
+          const parsed = parseSse(buf);
+          buf = parsed.rest;
+          for (const frame of parsed.frames) {
+            if (frame.event === 'snapshot' || frame.event === undefined) continue;
+            let event: { sequence?: unknown; type?: unknown; payload?: Record<string, unknown> };
+            try { event = JSON.parse(frame.data); } catch { continue; }
+            o.onRawLine?.(JSON.stringify(event));
+            if (typeof event.sequence === 'number') cursor = Math.max(cursor, event.sequence);
+            lastActivity = Date.now();
+            if (event.type === 'log') {
+              const message = String(event.payload?.message ?? '').trim();
+              if (message) {
+                out.progress++;
+                o.onEvent({ type: 'progress', data: { message } });
+              }
+            } else if (event.type === 'succeeded' || event.type === 'failed' || event.type === 'cancelled') {
+              terminal = true;
+              if (event.type === 'failed') out.agentError = String(event.payload?.safeSummary ?? event.payload?.code ?? 'Runner run failed');
+              if (event.type === 'cancelled') out.cancelled = true;
+            }
+          }
+          if (terminal || ctrl.signal.aborted) break;
+        }
+        if (!terminal && !ctrl.signal.aborted) await runnerApiStatus(runnerRunId, cfg).then(state => { terminal = RUNNER_TERMINAL.has(state); }).catch(() => undefined);
+        if (!terminal && !ctrl.signal.aborted) await new Promise(resolve => setTimeout(resolve, 250));
+      }
+      if (terminal && !ctrl.signal.aborted) {
+        let result: Response | undefined;
+        for (let attempt = 0; attempt < 8 && !ctrl.signal.aborted; attempt++) {
+          result = await fetch(`${cfg.runnerApiUrl}/v1/runs/${encodeURIComponent(runnerRunId)}/result`, {
+            headers: { authorization: `Bearer ${cfg.runnerApiToken}` }, signal: ctrl.signal,
+          });
+          if (result.ok || result.status !== 409) break;
+          await new Promise(resolve => setTimeout(resolve, 250));
+        }
+        if (!result) return out;
+        if (result.ok) {
+          const value = await result.json() as { text?: unknown; outcome?: unknown; failure?: { safeSummary?: unknown } };
+          if (typeof value.text === 'string' && value.text.length > 0) {
+            out.finalText = value.text;
+            out.chunks++;
+            o.onEvent({ type: 'chunk', data: { text: value.text } });
+          }
+          if (value.outcome === 'failed') out.agentError ??= String(value.failure?.safeSummary ?? 'Runner run failed');
+          if (value.outcome === 'cancelled') out.cancelled = true;
+          out.done = value.outcome === 'succeeded';
+          if (out.done) o.onEvent({ type: 'done', data: { session_id: runnerRunId } });
+        } else {
+          out.httpStatus = result.status;
+          out.httpError = (await result.text().catch(() => '')).slice(0, 2000);
+        }
+      }
+    } catch (e) {
+      if (!out.timedOut && !out.idleKilled && !out.cancelled) out.transportError = errorText(e);
+    } finally {
+      clearTimeout(hardTimer);
+      clearInterval(idleTimer);
+      out.durationMs = Date.now() - started;
+    }
+    return out;
+  })();
+
+  return { done, cancel: () => { if (runnerRunId) stop('cancelled'); else cancelRequested = true; } };
+}
+
+async function runnerApiStatus(runId: string, cfg: AgentProxyConfig): Promise<string> {
+  const res = await fetch(`${cfg.runnerApiUrl}/v1/runs/${encodeURIComponent(runId)}/status`, {
+    headers: { authorization: `Bearer ${cfg.runnerApiToken}` }, signal: AbortSignal.timeout(5000),
+  });
+  if (!res.ok) throw new Error(`Runner API status HTTP ${res.status}`);
+  const status = await res.json() as { state?: unknown };
+  return String(status.state ?? 'unknown');
+}
+
+async function runnerApiCancel(runId: string, cfg: AgentProxyConfig): Promise<boolean> {
+  if (!cfg.runnerApiToken) return false;
+  try {
+    const res = await fetch(`${cfg.runnerApiUrl}/v1/runs/${encodeURIComponent(runId)}/cancel`, {
+      method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${cfg.runnerApiToken}` },
+      body: JSON.stringify({ reason: 'cancelled_by_sar' }), signal: AbortSignal.timeout(10_000),
+    });
+    return res.ok;
+  } catch { return false; }
 }
 
 // fetch() hides the useful part (ECONNREFUSED ...) in error.cause.
